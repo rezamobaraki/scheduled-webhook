@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import ClassVar
 
-from sqlalchemy import TIMESTAMP, Enum, Index, String, Uuid
+from sqlalchemy import TIMESTAMP, CheckConstraint, Enum, Index, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.enums import TimerStatus
@@ -12,11 +12,26 @@ from src.models.state_mixin import StateMixin
 
 class Timer(StateMixin, BaseModel):
     __tablename__ = "timers"
-    __table_args__ = (Index("ix_timers_status_scheduled_at", "status", "scheduled_at"),)
+    __table_args__ = (
+        Index("ix_timers_status_scheduled_at", "status", "scheduled_at"),
+        CheckConstraint(
+            """
+            (status = 'pending' AND executed_at IS NULL)
+            OR
+            (status = 'processing' AND executed_at IS NULL)
+            OR
+            (status = 'executed' AND executed_at IS NOT NULL)
+            OR
+            (status = 'failed')
+            """,
+            name="ck_timers_status_executed_at_consistency",
+        ),
+    )
 
     _state_field = "status"
     _allowed_transitions: ClassVar[dict[TimerStatus, set[TimerStatus]]] = {
-        TimerStatus.PENDING: {TimerStatus.EXECUTED, TimerStatus.FAILED},
+        TimerStatus.PENDING: {TimerStatus.PROCESSING},
+        TimerStatus.PROCESSING: {TimerStatus.EXECUTED, TimerStatus.FAILED},
     }
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -44,8 +59,12 @@ class Timer(StateMixin, BaseModel):
             validate_strings=True,
         ),
         default=TimerStatus.PENDING,
+        server_default=text("'pending'"),
         nullable=False,
     )
 
     def __repr__(self) -> str:
-        return f"<Timer id={self.id!s} status={self.status}>"
+        return (
+            f"<Timer id={self.id} status={self.status.value} "
+            f"scheduled_at={self.scheduled_at.isoformat()}>"
+        )

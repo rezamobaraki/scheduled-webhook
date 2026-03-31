@@ -5,10 +5,13 @@
 """
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
+from alembic import command
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -16,12 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.core.configs import settings
 from src.core.database import SyncSessionLocal, get_async_session
 from src.main import app
-from src.models import BaseModel
 
 # ── Test-specific async engine (avoids event-loop mismatch) ──────────────────
 
 _test_async_engine = create_async_engine(settings.database.async_url, pool_size=5)
 _TestAsyncSessionLocal = async_sessionmaker(_test_async_engine, expire_on_commit=False)
+_ALEMBIC_CONFIG = Config(str(Path(__file__).parents[2] / "alembic.ini"))
 
 
 # ── Database lifecycle ───────────────────────────────────────────────────────
@@ -29,11 +32,16 @@ _TestAsyncSessionLocal = async_sessionmaker(_test_async_engine, expire_on_commit
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_tables():
-    """Create tables once per test session; drop them at the end."""
+    """Reset the schema and build it through Alembic migrations."""
     engine = create_engine(settings.database.sync_url)
-    BaseModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
+    command.upgrade(_ALEMBIC_CONFIG, "head")
     yield
-    BaseModel.metadata.drop_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
     engine.dispose()
 
 
@@ -102,4 +110,3 @@ async def client(
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
-

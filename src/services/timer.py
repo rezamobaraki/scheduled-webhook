@@ -35,8 +35,7 @@ class TimerService:
         except Exception:
             # Broker down — not fatal.  The sweep will recover this timer.
             logger.warning(
-                "Broker unreachable — sweep will recover timer %s.",
-                timer.id,
+                f"Broker unreachable — sweep will recover timer {timer.id!s}."
             )
 
         return TimerCreateResponse(id=timer.id, time_left=request.total_seconds)

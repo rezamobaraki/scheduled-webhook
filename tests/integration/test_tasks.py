@@ -1,26 +1,23 @@
 """Integration tests for Celery tasks — requires PostgreSQL via Docker.
 
-HTTP is mocked — these tests verify the task → repository → DB round-trip
-plus retry and sweep logic.
+Webhook delivery is mocked via ``WebhookService`` — these tests verify the
+task → repository → DB round-trip plus retry and sweep logic.
 """
 
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
-import httpx
+import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.configs import settings
+from src.core.errors import WebhookDeliveryError
 from src.enums import TimerStatus
 from src.models import Timer
 
 _WEBHOOK_URL = "https://example.com/webhook"
-
-
-def _make_response(status_code: int = 200) -> httpx.Response:
-    """Build an httpx Response that supports ``raise_for_status()``."""
-    return httpx.Response(status_code, request=httpx.Request("POST", _WEBHOOK_URL))
 
 
 def _insert_timer(
@@ -34,6 +31,7 @@ def _insert_timer(
         id=uuid.uuid4(),
         url=_WEBHOOK_URL,
         scheduled_at=datetime.now(UTC) - timedelta(seconds=seconds_ago),
+        executed_at=datetime.now(UTC) if status == TimerStatus.EXECUTED else None,
         status=status,
     )
     session.add(timer)
@@ -48,27 +46,22 @@ def _insert_timer(
 class TestFireWebhook:
     """Tests for the ``fire_webhook`` Celery task."""
 
-    @patch("src.worker.tasks.httpx.post")
-    def test_calls_url_and_marks_executed(self, mock_post, sync_session):
+    @patch("src.worker.tasks.webhook_service")
+    def test_calls_url_and_marks_executed(self, mock_service, sync_session):
         """Happy path: webhook succeeds → timer becomes 'executed'."""
         from src.worker.tasks import fire_webhook
 
         timer = _insert_timer(sync_session)
-        mock_post.return_value = _make_response(200)
 
         fire_webhook.apply(args=[str(timer.id)])
 
-        mock_post.assert_called_once_with(
-            timer.url,
-            json={"id": str(timer.id)},
-            timeout=settings.webhook.timeout,
-        )
+        mock_service.deliver.assert_called_once_with(timer.id, timer.url)
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.EXECUTED
         assert timer.executed_at is not None
 
-    @patch("src.worker.tasks.httpx.post")
-    def test_skips_already_executed_timer(self, mock_post, sync_session):
+    @patch("src.worker.tasks.webhook_service")
+    def test_skips_already_executed_timer(self, mock_service, sync_session):
         """Exactly-once: an executed timer must not trigger a second webhook."""
         from src.worker.tasks import fire_webhook
 
@@ -76,52 +69,67 @@ class TestFireWebhook:
 
         fire_webhook.apply(args=[str(timer.id)])
 
-        mock_post.assert_not_called()
+        mock_service.deliver.assert_not_called()
 
-    @patch("src.worker.tasks.httpx.post")
-    def test_skips_unknown_timer(self, mock_post):
+    @patch("src.worker.tasks.webhook_service")
+    def test_skips_unknown_timer(self, mock_service):
         """No-op when the timer ID does not exist."""
         from src.worker.tasks import fire_webhook
 
         fire_webhook.apply(args=[str(uuid.uuid4())])
 
-        mock_post.assert_not_called()
+        mock_service.deliver.assert_not_called()
 
-    @patch("src.worker.tasks.httpx.post")
-    def test_retries_then_marks_failed(self, mock_post, sync_session):
+    @patch("src.worker.tasks.webhook_service")
+    def test_retries_then_marks_failed(self, mock_service, sync_session):
         """Webhook failure → task retries, then marks timer 'failed'."""
         from src.worker.tasks import fire_webhook
 
         timer = _insert_timer(sync_session)
-        mock_post.side_effect = httpx.ConnectError("connection refused")
+        mock_service.deliver.side_effect = WebhookDeliveryError(
+            timer.id, cause=Exception("connection refused"),
+        )
 
         fire_webhook.apply(args=[str(timer.id)])
 
         # Initial call + retries
-        assert mock_post.call_count == settings.webhook.max_retries + 1
+        assert mock_service.deliver.call_count == settings.webhook.max_retries + 1
 
         # After all retries exhausted the timer is marked failed.
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.FAILED
 
-    @patch("src.worker.tasks.httpx.post")
-    def test_retries_on_http_5xx(self, mock_post, sync_session):
+    @patch("src.worker.tasks.webhook_service")
+    def test_retries_on_http_5xx(self, mock_service, sync_session):
         """HTTP 500 from the webhook target triggers retry."""
         from src.worker.tasks import fire_webhook
 
         timer = _insert_timer(sync_session)
-        error_resp = _make_response(500)
-        mock_post.side_effect = httpx.HTTPStatusError(
-            "Internal Server Error",
-            request=error_resp.request,
-            response=error_resp,
+        mock_service.deliver.side_effect = WebhookDeliveryError(
+            timer.id, cause=Exception("Internal Server Error"),
         )
 
         fire_webhook.apply(args=[str(timer.id)])
 
-        assert mock_post.call_count == settings.webhook.max_retries + 1
+        assert mock_service.deliver.call_count == settings.webhook.max_retries + 1
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.FAILED
+
+    def test_rejects_inconsistent_executed_state(self, sync_session):
+        """The database must reject executed timers without ``executed_at``."""
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=datetime.now(UTC) - timedelta(seconds=60),
+            status=TimerStatus.EXECUTED,
+        )
+
+        sync_session.add(timer)
+
+        with pytest.raises(IntegrityError):
+            sync_session.commit()
+
+        sync_session.rollback()
 
 
 # ── sweep_overdue_timers ─────────────────────────────────────────────────────
@@ -176,4 +184,3 @@ class TestSweep:
         sweep_overdue_timers()
 
         mock_delay.assert_not_called()
-

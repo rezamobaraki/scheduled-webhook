@@ -14,18 +14,21 @@ with a status check — only one worker can claim a timer even under
 concurrent execution.
 """
 
+import uuid
 from datetime import UTC, datetime
-
-import httpx
 
 from src.core import Logger
 from src.core.configs import settings
 from src.core.database import SyncSessionLocal
+from src.core.errors import WebhookDeliveryError
 from src.enums import TimerStatus
 from src.repository import SyncTimerRepository, TimerSyncInterface
+from src.services.webhook import WebhookService
 from src.worker.celery_app import celery_app
 
 logger = Logger.get(__name__)
+
+webhook_service = WebhookService()
 
 
 @celery_app.task(
@@ -34,74 +37,68 @@ logger = Logger.get(__name__)
     acks_late=True,
 )
 def fire_webhook(self, timer_id: str) -> None:
-    """POST the webhook for a single timer.
+    """Claim a pending timer, deliver the webhook, and finalise state.
 
     Guarantees
     ----------
     * **Exactly-once**: ``SELECT … FOR UPDATE`` + ``WHERE status='pending'``
       ensures only one worker can claim the timer.
-    * **Retry**: on HTTP / network failure the task retries with exponential
+    * **Retry**: on delivery failure the task retries with exponential
       back-off (5 s → 10 s → 20 s …).
     * **Failure**: after ``max_retries`` the timer is marked ``FAILED``.
     """
+
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
-        timer = timer_repository.get_pending_for_update(timer_id)
+        timer = timer_repository.get_pending_for_update(uuid.UUID(timer_id))
 
         if timer is None:
-            logger.info("Timer %s already processed or unknown — skipping.", timer_id)
+            logger.info(f"Timer {timer_id} already processed or unknown — skipping.")
             return
 
+        # ── Claim ────────────────────────────────────────────────────
+        timer.transition_to(TimerStatus.PROCESSING)
+        session.commit()
+
+        # ── Deliver ──────────────────────────────────────────────────
         try:
-            response = httpx.post(
-                timer.url,
-                json={"id": str(timer.id)},
-                timeout=settings.webhook.timeout,
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            timer_repository.rollback()  # release row lock so next attempt can acquire it
+            webhook_service.deliver(timer.id, timer.url)
+        except WebhookDeliveryError as exc:
             logger.warning(
-                "Webhook %s failed (attempt %d/%d): %s",
-                timer_id,
-                self.request.retries + 1,
-                self.max_retries + 1,
-                exc,
+                f"Webhook {timer_id} failed"
+                f" (attempt {self.request.retries + 1}/{self.max_retries + 1}): {exc}"
             )
             if self.request.retries >= self.max_retries:
-                # All retries exhausted — mark permanently failed.
-                timer = timer_repository.get_pending_for_update(timer_id)
-                if timer is not None:
-                    timer.transition_to(TimerStatus.FAILED)
-                    session.commit()
-                raise exc from None  # propagate to Celery — no more retries
+                timer.transition_to(TimerStatus.FAILED)
+                session.commit()
+                raise exc from None
             raise self.retry(
                 exc=exc,
-                countdown=2**self.request.retries * 5,  # 5 s, 10 s, 20 s …
+                countdown=2**self.request.retries * 5,
             ) from exc
 
-        now = datetime.now(UTC)
+        # ── Finalise ─────────────────────────────────────────────────
         timer.transition_to(TimerStatus.EXECUTED)
-        timer.executed_at = now
+        timer.executed_at = datetime.now(UTC)
         session.commit()
-        logger.info("Timer %s executed successfully.", timer_id)
+        logger.info(f"Timer {timer_id} executed successfully.")
 
 
 @celery_app.task
 def sweep_overdue_timers() -> None:
     """Periodic safety-net (Layer 1).
 
-    Query Postgresql for overdue ``pending`` timers and re-dispatch them
-    into the broker.  ``fire_webhook`` handles de-duplication via row
-    locking, so duplicate dispatches are harmless.
+    Query Postgresql for overdue ``pending`` / ``processing`` timers and
+    re-dispatch them into the broker.  ``fire_webhook`` handles
+    de-duplication via row locking, so duplicate dispatches are harmless.
     """
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
         now = datetime.now(UTC)
-        overdue = timer_repository.get_overdue_pending_for_update(now)
+        overdue = timer_repository.get_overdue_for_update(now)
 
         for timer in overdue:
             fire_webhook.delay(str(timer.id))
 
         if overdue:
-            logger.info("Sweep dispatched %d overdue timer(s).", len(overdue))
+            logger.info(f"Sweep dispatched {len(overdue)} overdue timer(s).")

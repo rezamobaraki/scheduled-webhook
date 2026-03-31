@@ -12,7 +12,7 @@ class TimerAsyncInterface(Protocol):
 
 class TimerSyncInterface(Protocol):
     def get_pending_for_update(self, timer_id: uuid.UUID) -> Timer | None: ...
-    def get_overdue_pending_for_update(
+    def get_overdue_for_update(
         self,
         now: datetime,
         limit: int = 500,

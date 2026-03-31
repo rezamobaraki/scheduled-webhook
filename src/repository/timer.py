@@ -52,7 +52,7 @@ class SyncTimerRepository(TimerSyncInterface):
             .with_for_update(),
         ).scalar_one_or_none()
 
-    def get_overdue_pending_for_update(
+    def get_overdue_for_update(
         self,
         now: datetime,
         limit: int = 500,
@@ -65,7 +65,7 @@ class SyncTimerRepository(TimerSyncInterface):
         return list(
             self._session.execute(
                 select(Timer)
-                .where(Timer.status == TimerStatus.PENDING)
+                .where(Timer.status.in_([TimerStatus.PENDING, TimerStatus.PROCESSING]))
                 .where(Timer.scheduled_at <= now)
                 .order_by(Timer.scheduled_at.asc())
                 .limit(limit)
@@ -74,7 +74,6 @@ class SyncTimerRepository(TimerSyncInterface):
             .scalars()
             .all()
         )
-
 
     def flush(self) -> None:
         self._session.flush()
