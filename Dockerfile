@@ -5,7 +5,7 @@
 #   1. builder  — install dependencies + build the wheel (heavy, throwaway)
 #   2. runtime  — minimal image with only the installed packages + app code
 #
-# Best practices applied:
+# Best practices:
 #   • Multi-stage build (small final image, no build tooling in prod)
 #   • Non-root user (principle of least privilege)
 #   • Layer ordering optimised for Docker cache (deps → code)
@@ -13,6 +13,7 @@
 #   • OCI metadata labels
 #   • No dev dependencies in the final image
 #   • PYTHONDONTWRITEBYTECODE / PYTHONUNBUFFERED for containers
+#   • Healthchecks defined per-service in docker-compose.yml
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ── Stage 1: Builder ─────────────────────────────────────────────────────────

@@ -1,25 +1,17 @@
-"""SQLAlchemy engine and session factories.
-
-Two engines are maintained:
-
-* **async** — used by FastAPI request handlers (asyncpg).
-* **sync**  — used by Celery worker tasks (psycopg 3).
-"""
-
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.core.config import settings
+from src.core.configs import settings
 
 # ── Async (FastAPI) ──────────────────────────────────────────────────────────
 
 async_engine = create_async_engine(
-    settings.db.async_url,
-    pool_size=20,
-    max_overflow=10,
+    settings.database.async_url,
+    pool_size=settings.database.pool_size,
+    max_overflow=settings.database.max_overflow,
 )
 AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
 
@@ -33,9 +25,9 @@ async def get_async_session() -> AsyncGenerator[AsyncSession]:
 # ── Sync (Celery) ────────────────────────────────────────────────────────────
 
 sync_engine = create_engine(
-    settings.db.sync_url,
-    pool_size=10,
-    max_overflow=5,
+    settings.database.sync_url,
+    pool_size=settings.database.pool_size_sync,
+    max_overflow=settings.database.max_overflow_sync,
 )
 SyncSessionLocal = sessionmaker(sync_engine, expire_on_commit=False)
 
