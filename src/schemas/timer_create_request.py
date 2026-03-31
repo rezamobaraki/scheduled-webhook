@@ -7,7 +7,7 @@ _MAX_SECONDS = 30 * 24 * 3600
 
 
 class TimerCreateRequest(BaseModel):
-    """Body of ``POST /timer``."""
+
 
     hours: int = Field(ge=0, description="Hours component of the delay")
     minutes: int = Field(ge=0, description="Minutes component of the delay")

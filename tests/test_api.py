@@ -10,9 +10,6 @@ from httpx import AsyncClient
 from tests.conftest import make_timer_payload
 
 
-# ── POST /timer ──────────────────────────────────────────────────────────────
-
-
 class TestCreateTimer:
     """``POST /timer`` — create a new timer."""
 
@@ -35,7 +32,9 @@ class TestCreateTimer:
         assert resp.json()["time_left"] == 0
 
     async def test_dispatches_celery_task(
-        self, client: AsyncClient, mock_fire_webhook,
+        self,
+        client: AsyncClient,
+        mock_fire_webhook,
     ):
         await client.post("/timer", json=make_timer_payload())
         mock_fire_webhook.assert_called_once()
@@ -58,13 +57,15 @@ class TestCreateTimer:
 
     async def test_rejects_missing_url(self, client: AsyncClient):
         resp = await client.post(
-            "/timer", json={"hours": 0, "minutes": 0, "seconds": 10},
+            "/timer",
+            json={"hours": 0, "minutes": 0, "seconds": 10},
         )
         assert resp.status_code == 422
 
     async def test_rejects_excessive_duration(self, client: AsyncClient):
         resp = await client.post(
-            "/timer", json=make_timer_payload(hours=31 * 24),
+            "/timer",
+            json=make_timer_payload(hours=31 * 24),
         )
         assert resp.status_code == 422
 
@@ -115,4 +116,3 @@ class TestHealth:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
-

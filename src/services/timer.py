@@ -16,15 +16,18 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import Logger
+from src.core.errors import TimerNotFoundError
 from src.models import Timer
 from src.repository import TimerRepository
-from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerGetResponse
+from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerRetrieveResponse
 
 logger = Logger.get(__name__)
 
 
 class TimerService:
     """Stateless service — one instance per request."""
+
+    __slots__ = ("_repo",)
 
     def __init__(self, session: AsyncSession) -> None:
         self._repo = TimerRepository(session)
@@ -54,12 +57,15 @@ class TimerService:
 
         return TimerCreateResponse(id=timer.id, time_left=total_seconds)
 
-    async def get_timer(self, timer_id: uuid.UUID) -> TimerGetResponse | None:
-        """Return time remaining for *timer_id*, or ``None`` if not found."""
+    async def retrieve_timer(self, timer_id: uuid.UUID) -> TimerRetrieveResponse:
+        """Return time remaining for *timer_id*.
+
+        Raises :class:`TimerNotFoundError` if the timer does not exist.
+        """
         timer = await self._repo.get_by_id(timer_id)
         if timer is None:
-            return None
+            raise TimerNotFoundError(str(timer_id))
 
         delta = (timer.scheduled_at - datetime.now(UTC)).total_seconds()
-        return TimerGetResponse(id=timer.id, time_left=max(0, int(delta)))
+        return TimerRetrieveResponse(id=timer.id, time_left=max(0, int(delta)))
 

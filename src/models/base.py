@@ -6,7 +6,6 @@ from sqlalchemy.sql import func
 
 
 class BaseModel(DeclarativeBase):
-    """Shared base — every model inherits audit timestamps."""
 
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),

@@ -20,7 +20,7 @@ target_metadata = BaseModel.metadata
 def run_migrations_offline() -> None:
     """Generate SQL without a live database connection."""
     context.configure(
-        url=settings.database.async_url,
+        url=settings.database.async_url.render_as_string(hide_password=False),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -36,7 +36,10 @@ def _do_run_migrations(connection) -> None:  # noqa: ANN001
 
 
 async def _run_async_migrations() -> None:
-    engine = create_async_engine(settings.database.async_url)
+    engine = create_async_engine(
+        settings.database.async_url,
+        pool_pre_ping=settings.database.pool_pre_ping,
+    )
     async with engine.connect() as conn:
         await conn.run_sync(_do_run_migrations)
     await engine.dispose()

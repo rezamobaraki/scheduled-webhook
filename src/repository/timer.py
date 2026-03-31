@@ -1,14 +1,3 @@
-"""Data access layer for Timer entities.
-
-Two repository classes are provided:
-
-* ``TimerRepository``     — async, used by the FastAPI service layer.
-* ``SyncTimerRepository`` — sync, used by Celery worker tasks.
-
-Both encapsulate every database query behind a named method so that
-SQL logic is never scattered across service or task code.
-"""
-
 import uuid
 from datetime import UTC, datetime
 
@@ -22,12 +11,12 @@ from src.models import Timer
 
 class TimerRepository:
     """Async data-access for Timer entities (FastAPI request path)."""
+    __slots__ = ("_session",)
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def create(self, timer: Timer) -> Timer:
-        """Persist a new timer and return the refreshed instance."""
         self._session.add(timer)
         await self._session.commit()
         await self._session.refresh(timer)
@@ -47,6 +36,7 @@ class SyncTimerRepository:
     Provides the specialised queries that workers need: row-level locking
     for exactly-once delivery and overdue-timer sweeps.
     """
+    __slots__ = ("_session",)
 
     def __init__(self, session: Session) -> None:
         self._session = session

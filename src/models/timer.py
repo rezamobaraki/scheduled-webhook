@@ -17,7 +17,9 @@ class Timer(BaseModel):
         primary_key=True,
         default=uuid.uuid7,
     )
+
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
+
     scheduled_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         nullable=False,
@@ -31,7 +33,7 @@ class Timer(BaseModel):
         Enum(
             TimerStatus,
             name="timer_status",
-            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+            values_callable=lambda status_enum: [status.value for status in status_enum],
             validate_strings=True,
         ),
         default=TimerStatus.PENDING,

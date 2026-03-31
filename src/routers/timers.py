@@ -1,19 +1,16 @@
-"""Timer REST endpoints.
-
-* ``POST /timer``          — create a new timer
-* ``GET  /timer/{id}``     — query remaining time
-"""
-
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_async_session
-from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerGetResponse
+from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerRetrieveResponse
 from src.services import TimerService
 
 router = APIRouter(prefix="/timer", tags=["timers"])
+
+AsyncSessionDep = Annotated[AsyncSession, Depends(get_async_session)]
 
 
 @router.post(
@@ -24,28 +21,20 @@ router = APIRouter(prefix="/timer", tags=["timers"])
 )
 async def create_timer(
     body: TimerCreateRequest,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSessionDep,
 ) -> TimerCreateResponse:
-    """Schedule a webhook to fire after the specified delay."""
     service = TimerService(session)
     return await service.create_timer(body)
 
 
 @router.get(
     "/{timer_id}",
-    response_model=TimerGetResponse,
+    response_model=TimerRetrieveResponse,
     summary="Get timer status",
 )
-async def get_timer(
-    timer_id: uuid.UUID,
-    session: AsyncSession = Depends(get_async_session),
-) -> TimerGetResponse:
-    """Return seconds remaining until the timer fires (``0`` if expired)."""
+async def retrieve_timer(
+    timer_id: Annotated[uuid.UUID, Path(title="Timer ID", description="UUID of the timer")],
+    session: AsyncSessionDep,
+) -> TimerRetrieveResponse:
     service = TimerService(session)
-    result = await service.get_timer(timer_id)
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Timer {timer_id} not found.",
-        )
-    return result
+    return await service.retrieve_timer(timer_id)

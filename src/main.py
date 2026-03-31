@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.core import Logger
+from src.core.database import async_engine
 from src.core.errors import register_exception_handlers
 from src.routers import timers_router
 
@@ -15,6 +16,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup / shutdown hooks."""
     Logger.setup()
     yield
+    # Dispose the async engine so all pooled connections are closed cleanly.
+    await async_engine.dispose()
 
 
 app = FastAPI(

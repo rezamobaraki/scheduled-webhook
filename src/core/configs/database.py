@@ -1,5 +1,6 @@
 from pydantic import computed_field
 from pydantic_settings import SettingsConfigDict
+from sqlalchemy import URL
 
 from src.core.configs.base import BaseConfig
 
@@ -21,20 +22,34 @@ class DatabaseSettings(BaseConfig):
     pool_size_sync: int = 2
     max_overflow_sync: int = 3
 
+    # Shared pool settings
+    pool_pre_ping: bool = True
+    pool_recycle: int = 1800  # seconds — recycle connections older than 30 min
+    pool_timeout: int = 30  # seconds to wait for a connection from the pool
+
+    # Debug — log every SQL statement (never enable in production)
+    echo: bool = False
+
     @computed_field
     @property
-    def async_url(self) -> str:
-        """``asyncpg`` URL used by FastAPI request handlers."""
-        return (
-            f"postgresql+asyncpg://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/{self.db}"
+    def async_url(self) -> URL:
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.user,
+            password=self.password,
+            host=self.host,
+            port=self.port,
+            database=self.db,
         )
 
     @computed_field
     @property
-    def sync_url(self) -> str:
-        """``psycopg`` URL used by Celery worker tasks."""
-        return (
-            f"postgresql+psycopg://{self.user}:{self.password}"
-            f"@{self.host}:{self.port}/{self.db}"
+    def sync_url(self) -> URL:
+        return URL.create(
+            drivername="postgresql+psycopg",
+            username=self.user,
+            password=self.password,
+            host=self.host,
+            port=self.port,
+            database=self.db,
         )

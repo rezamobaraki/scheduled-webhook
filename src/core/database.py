@@ -12,6 +12,10 @@ async_engine = create_async_engine(
     settings.database.async_url,
     pool_size=settings.database.pool_size,
     max_overflow=settings.database.max_overflow,
+    pool_pre_ping=settings.database.pool_pre_ping,
+    pool_recycle=settings.database.pool_recycle,
+    pool_timeout=settings.database.pool_timeout,
+    echo=settings.database.echo,
 )
 AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
 
@@ -28,6 +32,10 @@ sync_engine = create_engine(
     settings.database.sync_url,
     pool_size=settings.database.pool_size_sync,
     max_overflow=settings.database.max_overflow_sync,
+    pool_pre_ping=settings.database.pool_pre_ping,
+    pool_recycle=settings.database.pool_recycle,
+    pool_timeout=settings.database.pool_timeout,
+    echo=settings.database.echo,
 )
 SyncSessionLocal = sessionmaker(sync_engine, expire_on_commit=False)
 
