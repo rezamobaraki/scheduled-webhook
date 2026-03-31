@@ -172,13 +172,13 @@ Nothing is hardcoded — each domain has its own prefix:
 ```bash
 curl -s -X POST http://localhost:8000/timer \
   -H "Content-Type: application/json" \
-  -d '{"hours": 0, "minutes": 1, "seconds": 30, "url": "https://httpbin.org/post"}' | jq
+  -d '{"hours": 0, "minutes": 1, "seconds": 30, "url": "https://httpbin.org/post"}' | python3 -m json.tool
 ```
 
 ### Get timer status
 
 ```bash
-curl -s http://localhost:8000/timer/<timer-uuid> | jq
+curl -s http://localhost:8000/timer/<timer-uuid> | python3 -m json.tool
 ```
 
 ---
