@@ -341,6 +341,14 @@ flowchart TD
 - After the configured retry limit, the timer is marked `failed`.
 - Redirects are followed during webhook delivery to avoid false failures on common `301/302` responses.
 
+### Webhook Idempotency
+
+- Outbound webhooks include a stable `Idempotency-Key` header and an `X-Timer-Id` header, both set to the timer id.
+- Those headers stay the same across retries, so the receiver can safely detect duplicates.
+- This service coordinates timer ownership and retries, but the external HTTP boundary should still be treated as `at-least-once`.
+- If the receiver needs business-level exactly-once behavior, it should store processed event ids in a `processed_events` table with a unique constraint.
+- A typical receiver flow is: insert `timer_id` into `processed_events`, execute the side effect on first insert, and return success without repeating work on conflict.
+
 ### Timing Model
 
 - All scheduling is based on UTC timestamps.

@@ -218,6 +218,23 @@ Only **one** Beat instance should run (it is the sweep coordinator).
 - Beat scans Postgres every **5 minutes** for newly eligible future timers.
 - The overdue recovery sweep runs every **60 seconds**.
 
+## Delivery Semantics
+
+Webhook delivery at the network boundary should be treated as `at-least-once`, not mathematically exact once.
+
+To make duplicate delivery safe, every outbound webhook includes:
+
+- `Idempotency-Key: <timer_id>`
+- `X-Timer-Id: <timer_id>`
+
+The receiving system should deduplicate by that stable key. A common pattern is a `processed_events` table with a unique `event_id` or `timer_id` column:
+
+1. insert the incoming `Idempotency-Key`
+2. if the insert succeeds, apply the business side effect
+3. if the insert conflicts, return `200` and do nothing
+
+That gives effective exactly-once behavior at the business level even if the webhook is retried.
+
 ---
 
 ## High-Traffic Production Changes

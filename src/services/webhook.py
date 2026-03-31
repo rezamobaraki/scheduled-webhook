@@ -20,6 +20,10 @@ class WebhookService:
             response = httpx.post(
                 url,
                 json={"id": str(timer_id)},
+                headers={
+                    "Idempotency-Key": str(timer_id),
+                    "X-Timer-Id": str(timer_id),
+                },
                 timeout=self._timeout,
                 follow_redirects=True,
             )
