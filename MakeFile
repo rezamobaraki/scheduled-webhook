@@ -1,4 +1,4 @@
-.PHONY: run worker beat test lint fmt migrate infra clean
+.PHONY: run worker beat test lint fmt migrate infra up down clean help
 
 # ── Development ──────────────────────────────────────────────────────────────
 
@@ -33,16 +33,15 @@ migrate:  ## Apply Alembic migrations
 infra:  ## Start Postgresql and Redis in Docker
 	docker compose up postgres redis -d
 
-up:  ## Start the full stack via Docker Compose
+up:  ## Start the full Docker Compose stack
 	docker compose up --build
 
 down:  ## Stop all Docker Compose services
 	docker compose down
 
-clean:  ## Remove Docker volumes (⚠ destroys data)
+clean:  ## Remove Docker volumes (destroys data)
 	docker compose down -v
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
-

@@ -1,6 +1,6 @@
 """Celery tasks — webhook delivery and two-layered scheduler.
 
-Architecture (two-layered scheduler, per example.md):
+Architecture (two-layered scheduler):
 
 * **Layer 1 — windowed dispatch**: ``dispatch_upcoming_timers`` runs every
   ~5 min via Celery Beat, querying Postgresql for ``pending`` timers whose

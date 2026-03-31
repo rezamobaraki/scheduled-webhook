@@ -1,7 +1,11 @@
 # Timer Service
 
-A horizontally-scalable webhook scheduling service built with
+Wellcome to my In-Hurry Implementation of the Timer Service ;)
+
+A scalable webhook scheduling service built with
 **FastAPI · Celery · Postgresql · Redis**.
+
+See [docs/solution_desing.md](docs/solution_desing.md) for the full design write-up.
 
 ---
 
@@ -15,9 +19,10 @@ POST /timer─▶  (source of truth)    │──dispatch─▶  (timely deliver
             │                        │          │                         │
             └───────────┬────────────┘          └────────────┬────────────┘
                         │                                    │
-                        │ sweep (every 30 s)                 │ fire at ETA
+                        │ dispatch (every 5 min)             │ fire at ETA
+                        │ sweep (every 60 s)                 │
                         │ ◀─── Celery Beat ──────────────────┘
-                        │     (recovery safety-net)          │
+                        │     (dispatch + recovery)          │
                         │                                    ▼
                         │                              POST webhook
                         │                                    │
@@ -25,12 +30,23 @@ POST /timer─▶  (source of truth)    │──dispatch─▶  (timely deliver
                           UPDATE status = 'executed'
 ```
 
+### Visual Diagram
+
+Editable and shareable versions:
+
+- [Excalidraw source](docs/webhook-scheduler.excalidraw)
+- [PNG export](docs/webhook-scheduler.png)
+- [Open in Excalidraw](https://excalidraw.com/#json=pK7Fl0v2NO3CVn1t7sdH5,FglgSh9OEXgbiqEdiBvYyg)
+
+![Webhook Scheduler Diagram](docs/webhook-scheduler.png)
+
 | Concern | How it is solved |
 |---|---|
-| **Persistence** | Postgresql stores every timer before dispatching to broker |
-| **Precision** | Celery `apply_async(eta=…)` fires at the right instant |
-| **Restart recovery** | Beat sweeps every 30 s for overdue pending timers |
-| **Exactly-once** | `SELECT … FOR UPDATE` + `WHERE status='pending'` |
+| **Persistence** | Postgresql stores every timer before it enters the broker |
+| **Precision** | Celery `apply_async(eta=…)` executes near the scheduled instant |
+| **Future scheduling** | Beat dispatches `pending` timers due in the next 5 minutes |
+| **Restart recovery** | Beat sweeps every 60 s for overdue `pending` / `processing` timers |
+| **Exactly-once** | `SELECT … FOR UPDATE` + state check inside `fire_webhook` |
 | **Horizontal scale** | Stateless API replicas · competing Celery workers |
 | **Retry** | Exponential back-off (5 s → 10 s → 20 s), then `FAILED` |
 
@@ -40,25 +56,25 @@ POST /timer─▶  (source of truth)    │──dispatch─▶  (timely deliver
 src/
 ├── main.py                    FastAPI app + lifespan
 ├── core/
-│   ├── config.py              Pydantic Settings (composed, not hardcoded)
+│   ├── configs/               Pydantic settings
 │   └── database.py            Async + Sync SQLAlchemy engines
 ├── models/
-│   ├── base.py                DeclarativeBase
-│   ├── enums.py               TimerStatus enum
+│   ├── base.py                Declarative base + common fields
 │   └── timer.py               Timer ORM model
 ├── schemas/
 │   ├── timer_create_request.py  Pydantic request DTO
 │   ├── timer_create_response.py Pydantic response DTO (create)
-│   └── timer_get_response.py    Pydantic response DTO (get)
+│   └── timer_retrieve_response.py Pydantic response DTO (get)
 ├── repository/
 │   └── timer.py               TimerRepository (async) + SyncTimerRepository
 ├── services/
-│   └── timer.py               TimerService — business logic
+│   ├── timer.py               TimerService — business logic
+│   └── webhook.py             Outbound webhook delivery
 ├── routers/
 │   └── timers.py              POST /timer · GET /timer/{id}
 └── worker/
     ├── celery_app.py           Celery configuration
-    └── tasks.py                fire_webhook · sweep_overdue_timers
+    └── tasks.py                dispatch_upcoming_timers · sweep_overdue_timers · fire_webhook
 ```
 
 ### Layer dependency flow
@@ -78,10 +94,51 @@ Router  →  Service  →  Repository  →  SQLAlchemy Session  →  Postgresql
 cp .env.example .env          # edit if needed
 
 # 2. Build and start everything
+# Compose will run the one-shot `migrate` service before app containers.
 docker compose up --build
 
 # API:   http://localhost:8000
 # Docs:  http://localhost:8000/docs
+```
+
+## Make Commands
+
+```bash
+# Show available targets
+make help
+
+# Start only Postgres and Redis
+make infra
+
+# Apply database migrations
+make migrate
+
+# Run the API locally
+make run
+
+# Run a Celery worker locally
+make worker
+
+# Run Celery Beat locally
+make beat
+
+# Run the full Docker Compose stack
+make up
+
+# Stop the Docker Compose stack
+make down
+
+# Run tests
+make test
+
+# Run lint checks
+make lint
+
+# Format code
+make fmt
+
+# Remove volumes and reset local data
+make clean
 ```
 
 ## Configuration
@@ -101,7 +158,9 @@ Nothing is hardcoded — each domain has its own prefix:
 | `REDIS_DB` | `0` | Redis database index |
 | `WEBHOOK_TIMEOUT` | `10` | HTTP timeout per webhook call (seconds) |
 | `WEBHOOK_MAX_RETRIES` | `3` | Retry attempts before marking `failed` |
-| `APP_SWEEP_INTERVAL` | `30` | Seconds between overdue-timer sweeps |
+| `APP_DISPATCH_WINDOW` | `300` | Timers due within this window are sent to Celery immediately |
+| `APP_DISPATCH_INTERVAL` | `300` | Seconds between Beat scans for the next dispatch window |
+| `APP_SWEEP_INTERVAL` | `60` | Seconds between overdue-timer recovery sweeps |
 
 ## API Usage
 
@@ -110,7 +169,7 @@ Nothing is hardcoded — each domain has its own prefix:
 ```bash
 curl -s -X POST http://localhost:8000/timer \
   -H "Content-Type: application/json" \
-  -d '{"hours": 0, "minutes": 1, "seconds": 30, "url": "https://example.com/hook"}' | jq
+  -d '{"hours": 0, "minutes": 1, "seconds": 30, "url": "https://httpbin.org/post"}' | jq
 ```
 
 ### Get timer status
@@ -155,8 +214,9 @@ Only **one** Beat instance should run (it is the sweep coordinator).
 - Webhooks are called with a **10-second timeout**.
 - Failed webhooks are retried **3 times** with exponential back-off before
   being marked `FAILED`.
-- The sweep interval is **30 seconds** (maximum extra latency after a
-  broker failure / restart).
+- Timers due within the next **5 minutes** are pushed to Celery immediately.
+- Beat scans Postgres every **5 minutes** for newly eligible future timers.
+- The overdue recovery sweep runs every **60 seconds**.
 
 ---
 
@@ -174,4 +234,3 @@ For **100+ timer creations per second**:
 | **Old data** | Archive `executed` / `failed` timers older than N days to cold storage |
 | **Observability** | Prometheus metrics: creation rate, webhook latency, sweep lag, retry rate |
 | **Rate limiting** | Protect `POST /timer` with token-bucket rate limiter |
-

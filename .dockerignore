@@ -30,7 +30,7 @@ docker-compose.yml
 docs/
 *.md
 LICENSE
-MakeFile
+Makefile
 
 # ── Environment / secrets (injected at runtime, never baked in) ──────────────
 .env
@@ -39,4 +39,3 @@ MakeFile
 
 # ── Tests (not needed in production image) ───────────────────────────────────
 tests/
-
