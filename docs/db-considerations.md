@@ -28,8 +28,11 @@ tasks call `session.commit()` explicitly after the full operation succeeds.
 | **Flexibility** | PK-only — cannot add filters | Arbitrary WHERE clauses |
 
 **Decision:** Use `Session.get()` for simple PK lookups (e.g. `get_by_id`).
-Use `select()` when additional filters are needed (e.g. `get_for_update`
-adds `WHERE status IN ('pending', 'processing')`).
+Use `select()` when locking or additional filters are needed (e.g. `get_for_update`
+uses `FOR UPDATE` with PK lookup, `get_overdue_for_update` adds status and time
+filters).  Status checks for `fire_webhook` are done in application code rather
+than SQL to avoid subtle issues with enum `IN` clauses and connection-pool
+state during Celery retries.
 
 ---
 
@@ -85,4 +88,3 @@ Sync  (Celery):   pool_size=5,  max_overflow=5   → 10 connections max per work
 | Postgresql default `max_connections = 100` | At 2 API + 2 workers: (2 × 30) + (2 × 10) = 80 — within limits |
 | Scaling beyond 3 instances | Introduce PgBouncer as a connection multiplexer |
 | Idle connection cost | `pool_recycle=1800` drops stale connections; `pool_pre_ping=True` validates before use |
-

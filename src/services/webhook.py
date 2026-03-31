@@ -23,6 +23,7 @@ class WebhookService:
                 url,
                 json={"id": str(timer_id)},
                 timeout=self._timeout,
+                follow_redirects=True,
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:

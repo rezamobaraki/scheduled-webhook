@@ -45,12 +45,13 @@ webhook_service = WebhookService()
     acks_late=True,
 )
 def fire_webhook(self, timer_id: str) -> None:
-    """Claim a retryable timer, deliver the webhook, and finalise state.
+    """Claim a timer, deliver the webhook, and finalise state.
 
     Guarantees
     ----------
-    * **Exactly-once**: ``SELECT … FOR UPDATE`` + status filter ensures
-      only one worker can claim the timer.
+    * **Exactly-once**: ``SELECT … FOR UPDATE`` ensures only one worker
+      can hold the row.  Status check in application code skips finalised
+      timers and allows retries on ``PROCESSING`` timers.
     * **Retry**: on delivery failure the task retries with exponential
       back-off (5 s → 10 s → 20 s …).
     * **Failure**: after ``max_retries`` the timer is marked ``FAILED``.
@@ -61,7 +62,14 @@ def fire_webhook(self, timer_id: str) -> None:
         timer = timer_repository.get_for_update(uuid.UUID(timer_id))
 
         if timer is None:
-            logger.info(f"Timer {timer_id} already processed or unknown, skipping.")
+            logger.info(f"Timer {timer_id} not found — skipping.")
+            return
+
+        # ── Guard: skip already-finalised timers ─────────────────────
+        if timer.status in (TimerStatus.EXECUTED, TimerStatus.FAILED):
+            logger.info(
+                f"Timer {timer_id} already {timer.status.value} — skipping."
+            )
             return
 
         # ── Claim ────────────────────────────────────────────────────

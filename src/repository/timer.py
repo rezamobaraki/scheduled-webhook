@@ -40,17 +40,15 @@ class SyncTimerRepository(TimerSyncInterface):
         self._session = session
 
     def get_for_update(self, timer_id: uuid.UUID) -> Timer | None:
-        """Lock and return a retryable timer, or ``None`` if already finalised.
+        """Lock and return a timer by PK, or ``None`` if it does not exist.
 
-        Accepts both ``PENDING`` and ``PROCESSING`` so that Celery retries
-        can re-claim a timer that was moved to ``PROCESSING`` on a prior
-        attempt.  ``SELECT … FOR UPDATE`` ensures only one worker holds
-        the row at a time.
+        Uses ``SELECT … FOR UPDATE`` so concurrent workers compete safely —
+        only one will hold the row at a time.  Status checks are done in
+        application code (``fire_webhook``) for clarity and robustness.
         """
         return self._session.execute(
             select(Timer)
             .where(Timer.id == timer_id)
-            .where(Timer.status.in_([TimerStatus.PENDING, TimerStatus.PROCESSING]))
             .with_for_update(),
         ).scalar_one_or_none()
 
