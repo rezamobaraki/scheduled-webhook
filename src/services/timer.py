@@ -1,12 +1,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.core import Logger
 from src.core.errors import TimerNotFoundError
 from src.models import Timer
-from src.repository import TimerAsyncInterface, TimerRepository
+from src.repository import TimerAsyncInterface
 from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerRetrieveResponse
 
 logger = Logger.get(__name__)
@@ -44,9 +42,14 @@ class TimerService:
         return TimerCreateResponse(id=timer.id, time_left=request.total_seconds)
 
     async def retrieve_timer(self, timer_id: uuid.UUID) -> TimerRetrieveResponse:
-        timer = await self.timer_repository.get_by_id(timer_id)
-        if timer is None:
-            raise TimerNotFoundError(str(timer_id))
-
+        timer = await self._get_timer(timer_id)
         delta = (timer.scheduled_at - datetime.now(UTC)).total_seconds()
         return TimerRetrieveResponse(id=timer.id, time_left=max(0, int(delta)))
+
+    async def _get_timer(self, timer_id: uuid.UUID) -> Timer:
+        """Fetch a timer by PK or raise ``TimerNotFoundError``."""
+        timer = await self.timer_repository.get_by_id(timer_id)
+        if not timer:
+            raise TimerNotFoundError(str(timer_id))
+        return timer
+

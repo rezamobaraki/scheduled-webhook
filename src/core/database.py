@@ -21,9 +21,18 @@ AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession]:
-    """FastAPI dependency — yields one session per request."""
+    """FastAPI dependency — yields one session per request.
+
+    Commits on success, rolls back on any exception.
+    Repositories only ``flush()``; the transaction boundary lives here.
+    """
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # ── Sync (Celery) ────────────────────────────────────────────────────────────

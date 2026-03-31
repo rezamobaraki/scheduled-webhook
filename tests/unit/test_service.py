@@ -74,7 +74,7 @@ class TestCreateTimer:
             assert resp.id in repo._store  # timer was saved despite broker failure
 
     async def test_zero_delay_returns_zero(self):
-        fake_module, mock_task = _mock_tasks_module()
+        fake_module, _mock_task = _mock_tasks_module()
         with patch.dict("sys.modules", {"src.worker.tasks": fake_module}):
             repo = FakeTimerRepository()
             service = TimerService(timer_repository=repo)

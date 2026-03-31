@@ -1,16 +1,23 @@
 import uuid
 from datetime import datetime
+from typing import ClassVar
 
 from sqlalchemy import TIMESTAMP, Enum, Index, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.enums import TimerStatus
 from src.models.base import BaseModel
+from src.models.state_mixin import StateMixin
 
 
-class Timer(BaseModel):
+class Timer(StateMixin, BaseModel):
     __tablename__ = "timers"
     __table_args__ = (Index("ix_timers_status_scheduled_at", "status", "scheduled_at"),)
+
+    _state_field = "status"
+    _allowed_transitions: ClassVar[dict[TimerStatus, set[TimerStatus]]] = {
+        TimerStatus.PENDING: {TimerStatus.EXECUTED, TimerStatus.FAILED},
+    }
 
     id: Mapped[uuid.UUID] = mapped_column(
         Uuid(),

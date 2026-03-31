@@ -15,7 +15,7 @@ class TimerCreateRequest(BaseModel):
     url: HttpUrl = Field(description="Webhook URL that will be POSTed when the timer fires")
 
     @model_validator(mode="after")
-    def _validate_total_duration(self) -> "TimerCreateRequest":
+    def _validate_total_duration(self) -> TimerCreateRequest:
         if self.total_seconds > _MAX_SECONDS:
             msg = f"Total delay must not exceed {_MAX_SECONDS}s (30 days)."
             raise ValueError(msg)

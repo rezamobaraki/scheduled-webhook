@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 
 from src.enums import TimerStatus
 from src.models import Timer
+from src.repository import TimerAsyncInterface, TimerSyncInterface
 
 
-class TimerRepository:
+class TimerRepository(TimerAsyncInterface):
     """Async data-access for Timer entities (FastAPI request path)."""
+
     __slots__ = ("_session",)
 
     def __init__(self, session: AsyncSession) -> None:
@@ -18,34 +20,30 @@ class TimerRepository:
 
     async def create(self, timer: Timer) -> Timer:
         self._session.add(timer)
-        await self._session.commit()
-        await self._session.refresh(timer)
+        await self._session.flush()
         return timer
 
     async def get_by_id(self, timer_id: uuid.UUID) -> Timer | None:
-        """Return a timer by its primary key, or ``None``."""
-        result = await self._session.execute(
-            select(Timer).where(Timer.id == timer_id),
-        )
-        return result.scalar_one_or_none()
+        return await self._session.get(Timer, timer_id)
 
 
-class SyncTimerRepository:
+class SyncTimerRepository(TimerSyncInterface):
     """Sync data-access for Timer entities (Celery worker path).
 
     Provides the specialised queries that workers need: row-level locking
     for exactly-once delivery and overdue-timer sweeps.
     """
+
     __slots__ = ("_session",)
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def get_pending_for_update(self, timer_id: str) -> Timer | None:
+    def get_pending_for_update(self, timer_id: uuid.UUID) -> Timer | None:
         """Lock and return a pending timer, or ``None`` if already processed.
 
-        Uses ``SELECT … FOR UPDATE`` so that concurrent workers compete
-        safely — only one will claim the row.
+        Uses ``SELECT … FOR UPDATE`` so concurrent workers compete safely —
+        only one will claim the row.
         """
         return self._session.execute(
             select(Timer)
@@ -54,30 +52,32 @@ class SyncTimerRepository:
             .with_for_update(),
         ).scalar_one_or_none()
 
-    def get_overdue_pending(self, limit: int = 500) -> list[Timer]:
-        """Return up to *limit* pending timers whose scheduled time has passed."""
+    def get_overdue_pending_for_update(
+        self,
+        now: datetime,
+        limit: int = 500,
+    ) -> list[Timer]:
+        """Return up to *limit* pending timers whose scheduled time has passed.
+
+        ``skip_locked=True`` lets concurrent sweep tasks partition work
+        without blocking each other.
+        """
         return list(
             self._session.execute(
                 select(Timer)
                 .where(Timer.status == TimerStatus.PENDING)
-                .where(Timer.scheduled_at <= datetime.now(UTC))
-                .limit(limit),
+                .where(Timer.scheduled_at <= now)
+                .order_by(Timer.scheduled_at.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True),
             )
             .scalars()
             .all()
         )
 
-    def mark_executed(self, timer: Timer) -> None:
-        """Transition a timer to ``EXECUTED`` and commit."""
-        timer.status = TimerStatus.EXECUTED
-        timer.executed_at = datetime.now(UTC)
-        self._session.commit()
 
-    def mark_failed(self, timer: Timer) -> None:
-        """Transition a timer to ``FAILED`` and commit."""
-        timer.status = TimerStatus.FAILED
-        self._session.commit()
+    def flush(self) -> None:
+        self._session.flush()
 
     def rollback(self) -> None:
-        """Roll back the current transaction (releases any row locks)."""
         self._session.rollback()

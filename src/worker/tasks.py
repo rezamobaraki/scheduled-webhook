@@ -14,11 +14,14 @@ with a status check — only one worker can claim a timer even under
 concurrent execution.
 """
 
+from datetime import UTC, datetime
+
 import httpx
 
 from src.core import Logger
 from src.core.configs import settings
 from src.core.database import SyncSessionLocal
+from src.enums import TimerStatus
 from src.repository import SyncTimerRepository, TimerSyncInterface
 from src.worker.celery_app import celery_app
 
@@ -69,14 +72,18 @@ def fire_webhook(self, timer_id: str) -> None:
                 # All retries exhausted — mark permanently failed.
                 timer = timer_repository.get_pending_for_update(timer_id)
                 if timer is not None:
-                    timer_repository.mark_failed(timer)
-                raise
+                    timer.transition_to(TimerStatus.FAILED)
+                    session.commit()
+                raise exc from None  # propagate to Celery — no more retries
             raise self.retry(
                 exc=exc,
                 countdown=2**self.request.retries * 5,  # 5 s, 10 s, 20 s …
-            )
+            ) from exc
 
-        timer_repository.mark_executed(timer)
+        now = datetime.now(UTC)
+        timer.transition_to(TimerStatus.EXECUTED)
+        timer.executed_at = now
+        session.commit()
         logger.info("Timer %s executed successfully.", timer_id)
 
 
@@ -90,7 +97,8 @@ def sweep_overdue_timers() -> None:
     """
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
-        overdue = timer_repository.get_overdue_pending()
+        now = datetime.now(UTC)
+        overdue = timer_repository.get_overdue_pending_for_update(now)
 
         for timer in overdue:
             fire_webhook.delay(str(timer.id))
