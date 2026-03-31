@@ -21,11 +21,6 @@ AsyncSessionLocal = async_sessionmaker(async_engine, expire_on_commit=False)
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession]:
-    """FastAPI dependency — yields one session per request.
-
-    Commits on success, rolls back on any exception.
-    Repositories only ``flush()``; the transaction boundary lives here.
-    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -50,5 +45,4 @@ SyncSessionLocal = sessionmaker(sync_engine, expire_on_commit=False)
 
 
 def get_sync_session() -> Session:
-    """Return a sync session for Celery tasks (use as a context-manager)."""
     return SyncSessionLocal()

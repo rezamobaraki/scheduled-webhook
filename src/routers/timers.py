@@ -39,6 +39,5 @@ async def retrieve_timer(
     timer_id: Annotated[uuid.UUID, Path(title="Timer ID", description="UUID of the timer")],
     session: AsyncSessionDep,
 ) -> TimerRetrieveResponse:
-    """Return seconds remaining until the timer fires (``0`` if expired)."""
     service = TimerService(timer_repository=TimerRepository(session))
     return await service.retrieve_timer(timer_id)

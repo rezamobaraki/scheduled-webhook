@@ -9,8 +9,6 @@ from src.enums import ErrorCode
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    """Attach custom JSON error handlers to the FastAPI application."""
-
     @app.exception_handler(AppError)
     async def _app_error(request: Request, exc: AppError) -> JSONResponse:
         body = ErrorResponse(error=exc.detail, code=exc.code)
@@ -38,4 +36,3 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=body.model_dump(),
         )
-

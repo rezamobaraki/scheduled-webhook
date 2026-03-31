@@ -1,5 +1,3 @@
-"""Request schema for timer creation."""
-
 import ipaddress
 import re
 
@@ -52,5 +50,4 @@ class TimerCreateRequest(BaseModel):
 
     @property
     def total_seconds(self) -> int:
-        """Total delay expressed in seconds."""
         return self.hours * 3600 + self.minutes * 60 + self.seconds

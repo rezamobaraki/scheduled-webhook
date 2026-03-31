@@ -1,5 +1,3 @@
-"""State-machine transition error."""
-
 from enum import StrEnum
 
 from fastapi import status
@@ -16,4 +14,3 @@ class StateTransitionError(AppError):
         super().__init__(
             f"{model} cannot transition from '{current}' to '{target}'.",
         )
-

@@ -1,5 +1,3 @@
-"""Base application error."""
-
 from fastapi import status
 
 from src.enums import ErrorCode

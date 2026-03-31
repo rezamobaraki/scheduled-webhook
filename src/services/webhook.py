@@ -1,5 +1,3 @@
-"""Webhook delivery service — owns the outbound HTTP call."""
-
 import uuid
 
 import httpx

@@ -12,7 +12,6 @@ from src.routers import timers_router
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    """Application lifespan: startup / shutdown hooks."""
     Logger.setup()
     yield
     # Dispose the async engine so all pooled connections are closed cleanly.
@@ -37,5 +36,4 @@ async def root() -> RedirectResponse:
 
 @app.get("/health", tags=["health"])
 async def health_check() -> dict[str, str]:
-    """Liveness probe."""
     return {"status": "ok"}

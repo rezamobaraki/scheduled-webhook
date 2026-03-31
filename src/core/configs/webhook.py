@@ -1,5 +1,3 @@
-"""Webhook delivery — env prefix ``WEBHOOK_``."""
-
 from pydantic_settings import SettingsConfigDict
 
 from src.core.configs.base import BaseConfig

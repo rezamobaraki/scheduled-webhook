@@ -19,10 +19,6 @@ class Logger:
 
     @classmethod
     def setup(cls) -> None:
-        """
-        Configure structlog with JSON output.
-        Safe to call multiple times — stdlib handler guard prevents duplicate log lines.
-        """
         structlog.configure(
             processors=[
                 TimeStamper(fmt="iso"),
