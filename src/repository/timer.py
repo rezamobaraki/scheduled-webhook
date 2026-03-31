@@ -31,7 +31,7 @@ class SyncTimerRepository(TimerSyncInterface):
     """Sync data-access for Timer entities (Celery worker path).
 
     Provides the specialised queries that workers need: row-level locking
-    for exactly-once delivery and overdue-timer sweeps.
+    for exactly-once delivery, windowed dispatch, and overdue-timer sweeps.
     """
 
     __slots__ = ("_session",)
@@ -53,6 +53,32 @@ class SyncTimerRepository(TimerSyncInterface):
             .where(Timer.status.in_([TimerStatus.PENDING, TimerStatus.PROCESSING]))
             .with_for_update(),
         ).scalar_one_or_none()
+
+    def get_upcoming_pending(
+        self,
+        now: datetime,
+        window_end: datetime,
+        limit: int = 500,
+    ) -> list[Timer]:
+        """Return pending timers whose ``scheduled_at`` falls within the
+        dispatch window (``now`` < ``scheduled_at`` <= ``window_end``).
+
+        These timers have not yet been dispatched to the broker.  No row
+        lock is needed — ``fire_webhook`` handles de-duplication via its
+        own ``SELECT … FOR UPDATE``.
+        """
+        return list(
+            self._session.execute(
+                select(Timer)
+                .where(Timer.status == TimerStatus.PENDING)
+                .where(Timer.scheduled_at > now)
+                .where(Timer.scheduled_at <= window_end)
+                .order_by(Timer.scheduled_at.asc())
+                .limit(limit),
+            )
+            .scalars()
+            .all()
+        )
 
     def get_overdue_for_update(
         self,

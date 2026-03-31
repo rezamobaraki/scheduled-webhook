@@ -86,6 +86,26 @@ class TestCreateTimer:
 
             assert resp.time_left == 0
 
+    async def test_far_future_timer_not_dispatched(self):
+        """Timers beyond the dispatch window are NOT sent to Redis on create.
+
+        The periodic ``dispatch_upcoming_timers`` task will pick them up
+        when they fall inside the window.
+        """
+        fake_module, mock_task = _mock_tasks_module()
+        with patch.dict("sys.modules", {"src.worker.tasks": fake_module}):
+            repo = FakeTimerRepository()
+            service = TimerService(timer_repository=repo)
+            req = TimerCreateRequest(
+                hours=1, minutes=0, seconds=0, url="https://example.com/hook",
+            )
+
+            resp = await service.create_timer(req)
+
+            assert resp.time_left == 3600
+            assert resp.id in repo._store
+            mock_task.apply_async.assert_not_called()
+
 
 class TestRetrieveTimer:
     """``TimerService.retrieve_timer`` — business logic only."""
@@ -124,5 +144,4 @@ class TestRetrieveTimer:
 
         with pytest.raises(TimerNotFoundError):
             await service.retrieve_timer(uuid.uuid4())
-
 

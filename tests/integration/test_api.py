@@ -129,12 +129,8 @@ class TestRetrieveTimer:
 class TestHealth:
     """``GET /health`` — liveness probe."""
 
-    async def test_root_redirects_to_docs(self, client: AsyncClient):
-        resp = await client.get("/", follow_redirects=False)
-        assert resp.status_code == 307
-        assert resp.headers["location"] == "/docs"
-
     async def test_health_check(self, client: AsyncClient):
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+

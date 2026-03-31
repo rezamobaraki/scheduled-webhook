@@ -1,13 +1,21 @@
-"""Celery tasks — webhook delivery and overdue-timer recovery.
+"""Celery tasks — webhook delivery and two-layered scheduler.
 
-Architecture (two-layered scheduler):
+Architecture (two-layered scheduler, per example.md):
 
-* **Layer 2 — precision**: ``fire_webhook`` is dispatched with an ETA so the
-  broker delivers it close to the scheduled instant.
-* **Layer 1 — durability**: ``sweep_overdue_timers`` runs every 30 s via
-  Celery Beat, querying Postgresql for any ``pending`` timers whose
-  ``scheduled_at`` has passed.  This recovers from broker failures and
-  process restarts.
+* **Layer 1 — windowed dispatch**: ``dispatch_upcoming_timers`` runs every
+  ~5 min via Celery Beat, querying Postgresql for ``pending`` timers whose
+  ``scheduled_at`` falls within the next ~5-minute window.  Each timer is
+  sent to Redis with an appropriate ETA so workers execute it at the right
+  instant.
+
+* **Layer 1b — overdue recovery**: ``sweep_overdue_timers`` runs every 30 s,
+  catching any timers whose ``scheduled_at`` has already passed (e.g. after
+  a broker restart or missed dispatch window).
+
+* **Layer 2 — precision**: ``fire_webhook`` is dispatched with an ETA so
+  the broker delivers it close to the scheduled instant.  On creation,
+  timers due within the dispatch window are sent directly to Redis,
+  bypassing the periodic dispatcher for minimal latency.
 
 Exactly-once semantics are guaranteed by ``SELECT … FOR UPDATE`` combined
 with a status check — only one worker can claim a timer even under
@@ -15,7 +23,7 @@ concurrent execution.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from src.core import Logger
 from src.core.configs import settings
@@ -53,7 +61,7 @@ def fire_webhook(self, timer_id: str) -> None:
         timer = timer_repository.get_for_update(uuid.UUID(timer_id))
 
         if timer is None:
-            logger.info(f"Timer {timer_id} already processed or unknown - skipping.")
+            logger.info(f"Timer {timer_id} already processed or unknown — skipping.")
             return
 
         # ── Claim ────────────────────────────────────────────────────
@@ -90,8 +98,33 @@ def fire_webhook(self, timer_id: str) -> None:
 
 
 @celery_app.task
+def dispatch_upcoming_timers() -> None:
+    """Periodic windowed dispatcher (Layer 1).
+
+    Query Postgresql for ``pending`` timers whose ``scheduled_at`` falls
+    within the next dispatch window and send each to Redis with an
+    appropriate ETA.  ``fire_webhook`` handles de-duplication via row
+    locking, so duplicate dispatches are harmless.
+    """
+    with SyncSessionLocal() as session:
+        timer_repository: TimerSyncInterface = SyncTimerRepository(session)
+        now = datetime.now(UTC)
+        window_end = now + timedelta(seconds=settings.app.dispatch_window)
+        upcoming = timer_repository.get_upcoming_pending(now, window_end)
+
+        for timer in upcoming:
+            fire_webhook.apply_async(
+                args=[str(timer.id)],
+                eta=timer.scheduled_at,
+            )
+
+        if upcoming:
+            logger.info(f"Dispatcher sent {len(upcoming)} upcoming timer(s) to broker.")
+
+
+@celery_app.task
 def sweep_overdue_timers() -> None:
-    """Periodic safety-net (Layer 1).
+    """Periodic safety-net (Layer 1b).
 
     Query Postgresql for overdue ``pending`` / ``processing`` timers and
     re-dispatch them into the broker.  ``fire_webhook`` handles

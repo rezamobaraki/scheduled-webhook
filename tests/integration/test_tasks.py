@@ -213,3 +213,115 @@ class TestSweep:
         sweep_overdue_timers()
 
         mock_delay.assert_not_called()
+
+
+# ── dispatch_upcoming_timers ─────────────────────────────────────────────────
+
+class TestDispatcher:
+    """Tests for the ``dispatch_upcoming_timers`` windowed dispatcher task."""
+
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_dispatches_upcoming_pending_timers(self, mock_apply, sync_session):
+        """Dispatcher should dispatch pending timers due within the window."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        now = datetime.now(UTC)
+        t1 = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now + timedelta(minutes=2),
+            status=TimerStatus.PENDING,
+        )
+        t2 = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now + timedelta(minutes=4),
+            status=TimerStatus.PENDING,
+        )
+        sync_session.add_all([t1, t2])
+        sync_session.commit()
+
+        dispatch_upcoming_timers()
+
+        dispatched_ids = {c.kwargs["args"][0] for c in mock_apply.call_args_list}
+        assert str(t1.id) in dispatched_ids
+        assert str(t2.id) in dispatched_ids
+        assert mock_apply.call_count == 2
+
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_ignores_far_future_timers(self, mock_apply, sync_session):
+        """Dispatcher must skip timers beyond the dispatch window."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        far_future = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=datetime.now(UTC) + timedelta(hours=2),
+            status=TimerStatus.PENDING,
+        )
+        sync_session.add(far_future)
+        sync_session.commit()
+
+        dispatch_upcoming_timers()
+
+        mock_apply.assert_not_called()
+
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_ignores_already_executed(self, mock_apply, sync_session):
+        """Dispatcher must skip timers that have already been executed."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        now = datetime.now(UTC)
+        executed = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now + timedelta(minutes=2),
+            status=TimerStatus.EXECUTED,
+            executed_at=now,
+        )
+        sync_session.add(executed)
+        sync_session.commit()
+
+        dispatch_upcoming_timers()
+
+        mock_apply.assert_not_called()
+
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_ignores_overdue_timers(self, mock_apply, sync_session):
+        """Dispatcher only looks ahead — overdue timers belong to the sweep."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        overdue = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=datetime.now(UTC) - timedelta(minutes=5),
+            status=TimerStatus.PENDING,
+        )
+        sync_session.add(overdue)
+        sync_session.commit()
+
+        dispatch_upcoming_timers()
+
+        mock_apply.assert_not_called()
+
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_dispatches_with_eta(self, mock_apply, sync_session):
+        """Dispatched tasks must carry the timer's ``scheduled_at`` as ETA."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        scheduled = datetime.now(UTC) + timedelta(minutes=3)
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=scheduled,
+            status=TimerStatus.PENDING,
+        )
+        sync_session.add(timer)
+        sync_session.commit()
+
+        dispatch_upcoming_timers()
+
+        mock_apply.assert_called_once()
+        call_kwargs = mock_apply.call_args.kwargs
+        assert call_kwargs["eta"] == timer.scheduled_at
+

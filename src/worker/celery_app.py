@@ -44,9 +44,16 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
 
-    # Recovery sweep — periodically query Postgresql for overdue
-    # pending timers that the broker may have lost during a restart.
+    # ── Two-layered scheduler ─────────────────────────────────────────
+    # Layer 1:  Windowed dispatcher — scans DB for timers due in the
+    #           next ~5 min and sends them to Redis with ETAs.
+    # Layer 1b: Overdue sweep — catches timers that missed their window
+    #           (broker restart, missed dispatch, etc.).
     beat_schedule={
+        "dispatch-upcoming-timers": {
+            "task": "src.worker.tasks.dispatch_upcoming_timers",
+            "schedule": settings.app.dispatch_interval,
+        },
         "sweep-overdue-timers": {
             "task": "src.worker.tasks.sweep_overdue_timers",
             "schedule": settings.app.sweep_interval,
