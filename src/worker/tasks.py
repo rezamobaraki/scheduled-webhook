@@ -62,13 +62,13 @@ def fire_webhook(self, timer_id: str) -> None:
         timer = timer_repository.get_for_update(uuid.UUID(timer_id))
 
         if timer is None:
-            logger.info(f"Timer {timer_id} not found — skipping.")
+            logger.info(f"Timer {timer_id} not found, skipping.")
             return
 
         # ── Guard: skip already-finalised timers ─────────────────────
         if timer.status in (TimerStatus.EXECUTED, TimerStatus.FAILED):
             logger.info(
-                f"Timer {timer_id} already {timer.status.value} — skipping."
+                f"Timer {timer_id} already {timer.status.value}, skipping."
             )
             return
 

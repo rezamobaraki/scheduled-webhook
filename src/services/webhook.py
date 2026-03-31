@@ -29,4 +29,4 @@ class WebhookService:
         except httpx.HTTPError as exc:
             raise WebhookDeliveryError(timer_id, cause=exc) from exc
 
-        logger.info(f"Webhook delivered for timer {timer_id} → {url}")
+        logger.info(f"Webhook delivered for timer:{timer_id} Url: {url}")
