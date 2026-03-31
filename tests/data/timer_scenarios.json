@@ -27,7 +27,7 @@
       },
       {
         "id": "zero_delay",
-        "description": "Zero delay \u2014 fires immediately",
+        "description": "Zero delay fires immediately",
         "payload": {
           "hours": 0,
           "minutes": 0,
@@ -235,7 +235,7 @@
       },
       {
         "id": "ftp_scheme",
-        "description": "FTP scheme rejected \u2014 only http/https allowed",
+        "description": "FTP scheme rejected only http/https allowed",
         "payload": {
           "hours": 0,
           "minutes": 0,
@@ -306,7 +306,7 @@
       },
       {
         "id": "empty_id",
-        "description": "Empty string as timer ID \u2014 FastAPI redirects trailing slash",
+        "description": "Empty string as timer ID FastAPI redirects trailing slash",
         "path": "/timer/",
         "expected_status": 307
       },
