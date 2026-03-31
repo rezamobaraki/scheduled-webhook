@@ -227,7 +227,8 @@ To make duplicate delivery safe, every outbound webhook includes:
 - `Idempotency-Key: <timer_id>`
 - `X-Timer-Id: <timer_id>`
 
-The receiving system should deduplicate by that stable key. A common pattern is a `processed_events` table with a unique `event_id` or `timer_id` column:
+The receiving system should deduplicate by that stable key. A common pattern is a `processed_events[already mentioned as executions table]` 
+table with a unique `event_id` or `timer_id` column:
 
 1. insert the incoming `Idempotency-Key`
 2. if the insert succeeds, apply the business side effect
