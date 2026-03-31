@@ -1,0 +1,42 @@
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Python artefacts ─────────────────────────────────────────────────────────
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# ── Virtual environments ─────────────────────────────────────────────────────
+.venv
+venv
+
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.idea
+.vscode
+*.swp
+*.swo
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# ── CI / docs ────────────────────────────────────────────────────────────────
+docs/
+*.md
+LICENSE
+MakeFile
+
+# ── Environment / secrets (injected at runtime, never baked in) ──────────────
+.env
+.env.*
+!.env.example
+
+# ── Tests (not needed in production image) ───────────────────────────────────
+tests/
+
