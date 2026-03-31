@@ -1,6 +1,6 @@
-"""Repository (data-access) package."""
-
 from src.repository.timer import SyncTimerRepository, TimerRepository
 
-__all__ = ["SyncTimerRepository", "TimerRepository"]
-
+__all__ = (
+    "SyncTimerRepository",
+    "TimerRepository",
+)

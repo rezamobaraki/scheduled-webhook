@@ -1,7 +1,7 @@
 # Timer Service
 
 A horizontally-scalable webhook scheduling service built with
-**FastAPI · Celery · PostgreSQL · Redis**.
+**FastAPI · Celery · Postgresql · Redis**.
 
 ---
 
@@ -10,7 +10,7 @@ A horizontally-scalable webhook scheduling service built with
 ```text
                 LAYER 1 — DURABILITY               LAYER 2 — PRECISION
             ┌────────────────────────┐          ┌─────────────────────────┐
-            │      PostgreSQL        │          │     Redis  +  Celery    │
+            │      Postgresql        │          │     Redis  +  Celery    │
 POST /timer─▶  (source of truth)    │──dispatch─▶  (timely delivery)     │
             │                        │          │                         │
             └───────────┬────────────┘          └────────────┬────────────┘
@@ -27,7 +27,7 @@ POST /timer─▶  (source of truth)    │──dispatch─▶  (timely deliver
 
 | Concern | How it is solved |
 |---|---|
-| **Persistence** | PostgreSQL stores every timer before dispatching to broker |
+| **Persistence** | Postgresql stores every timer before dispatching to broker |
 | **Precision** | Celery `apply_async(eta=…)` fires at the right instant |
 | **Restart recovery** | Beat sweeps every 30 s for overdue pending timers |
 | **Exactly-once** | `SELECT … FOR UPDATE` + `WHERE status='pending'` |
@@ -64,7 +64,7 @@ src/
 ### Layer dependency flow
 
 ```
-Router  →  Service  →  Repository  →  SQLAlchemy Session  →  PostgreSQL
+Router  →  Service  →  Repository  →  SQLAlchemy Session  →  Postgresql
               ↓
          Celery Task dispatch
 ```
@@ -91,10 +91,10 @@ Nothing is hardcoded — each domain has its own prefix:
 
 | Variable | Default | Description |
 |---|---|---|
-| `POSTGRES_HOST` | — | PostgreSQL hostname |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_USER` | — | PostgreSQL username |
-| `POSTGRES_PASSWORD` | — | PostgreSQL password |
+| `POSTGRES_HOST` | — | Postgresql hostname |
+| `POSTGRES_PORT` | `5432` | Postgresql port |
+| `POSTGRES_USER` | — | Postgresql username |
+| `POSTGRES_PASSWORD` | — | Postgresql password |
 | `POSTGRES_DB` | — | Database name |
 | `REDIS_HOST` | — | Redis hostname |
 | `REDIS_PORT` | `6379` | Redis port |
@@ -166,7 +166,7 @@ For **100+ timer creations per second**:
 
 | Area | Change |
 |---|---|
-| **DB writes** | PgBouncer connection pool in front of PostgreSQL |
+| **DB writes** | PgBouncer connection pool in front of Postgresql |
 | **DB reads** | Read replicas for `GET /timer/{id}` |
 | **Sweep efficiency** | Range-partition `timers` by `scheduled_at`; sweep hits only the current partition |
 | **Broker HA** | Redis Sentinel / Cluster, or switch to RabbitMQ / SQS |

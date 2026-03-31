@@ -24,10 +24,10 @@
 
 ## The bottlenecks
 
-### 1. PostgreSQL connection limit (most critical)
+### 1. Postgresql connection limit (most critical)
 
 ```text
-Default PostgreSQL max_connections = 100
+Default Postgresql max_connections = 100
 
 Current pool per API instance:
   pool_size=20 + max_overflow=10 = 30 connections
@@ -56,12 +56,12 @@ SELECT * FROM timers WHERE status = 'pending' AND scheduled_at <= now()
 
 ### 1. PgBouncer — the most important change
 
-Add a connection pooler in front of PostgreSQL. It lets thousands of
+Add a connection pooler in front of Postgresql. It lets thousands of
 app-level connections share a small number of actual DB connections:
 
 ```text
 API instance 1 (30 conns) ──┐
-API instance 2 (30 conns) ──┤──▶ PgBouncer (10 real DB conns) ──▶ PostgreSQL
+API instance 2 (30 conns) ──┤──▶ PgBouncer (10 real DB conns) ──▶ Postgresql
 API instance 3 (30 conns) ──┘
 ```
 

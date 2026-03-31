@@ -30,7 +30,7 @@ migrate:  ## Apply Alembic migrations
 
 # ── Infrastructure ───────────────────────────────────────────────────────────
 
-infra:  ## Start PostgreSQL and Redis in Docker
+infra:  ## Start Postgresql and Redis in Docker
 	docker compose up postgres redis -d
 
 up:  ## Start the full stack via Docker Compose

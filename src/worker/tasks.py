@@ -5,7 +5,7 @@ Architecture (two-layered scheduler):
 * **Layer 2 — precision**: ``fire_webhook`` is dispatched with an ETA so the
   broker delivers it close to the scheduled instant.
 * **Layer 1 — durability**: ``sweep_overdue_timers`` runs every 30 s via
-  Celery Beat, querying PostgreSQL for any ``pending`` timers whose
+  Celery Beat, querying Postgresql for any ``pending`` timers whose
   ``scheduled_at`` has passed.  This recovers from broker failures and
   process restarts.
 
@@ -14,16 +14,15 @@ with a status check — only one worker can claim a timer even under
 concurrent execution.
 """
 
-import logging
-
 import httpx
 
-from src.core.config import settings
+from core import Logger
+from core.configs import settings
 from src.core.database import SyncSessionLocal
 from src.repository import SyncTimerRepository
 from src.worker.celery_app import celery_app
 
-logger = logging.getLogger(__name__)
+logger = Logger.get(__name__)
 
 
 @celery_app.task(
@@ -74,7 +73,7 @@ def fire_webhook(self, timer_id: str) -> None:
                 raise
             raise self.retry(
                 exc=exc,
-                countdown=2 ** self.request.retries * 5,  # 5 s, 10 s, 20 s …
+                countdown=2**self.request.retries * 5,  # 5 s, 10 s, 20 s …
             )
 
         repo.mark_executed(timer)
@@ -85,7 +84,7 @@ def fire_webhook(self, timer_id: str) -> None:
 def sweep_overdue_timers() -> None:
     """Periodic safety-net (Layer 1).
 
-    Query PostgreSQL for overdue ``pending`` timers and re-dispatch them
+    Query Postgresql for overdue ``pending`` timers and re-dispatch them
     into the broker.  ``fire_webhook`` handles de-duplication via row
     locking, so duplicate dispatches are harmless.
     """
@@ -98,4 +97,3 @@ def sweep_overdue_timers() -> None:
 
         if overdue:
             logger.info("Sweep dispatched %d overdue timer(s).", len(overdue))
-

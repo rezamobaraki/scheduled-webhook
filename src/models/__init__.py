@@ -1,6 +1,7 @@
-"""ORM models package."""
-
-from src.models.base import Base
+from src.models.base import BaseModel
 from src.models.timer import Timer
 
-__all__ = ["Base", "Timer"]
+__all__ = (
+    "BaseModel",
+    "Timer",
+)

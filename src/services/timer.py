@@ -10,17 +10,17 @@ The service never imports SQLAlchemy directly — all queries are
 delegated to the repository.
 """
 
-import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import Logger
 from src.models import Timer
 from src.repository import TimerRepository
 from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerGetResponse
 
-logger = logging.getLogger(__name__)
+logger = Logger.get(__name__)
 
 
 class TimerService:
@@ -33,7 +33,7 @@ class TimerService:
         """Create a timer, persist it, and dispatch a Celery task.
 
         Even if the broker is temporarily unreachable the timer is safe
-        in PostgreSQL — the periodic sweep will recover it.
+        in Postgresql — the periodic sweep will recover it.
         """
         total_seconds = req.total_seconds
         scheduled_at = datetime.now(UTC) + timedelta(seconds=total_seconds)

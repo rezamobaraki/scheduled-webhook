@@ -1,8 +1,3 @@
-"""Timer ORM model.
-
-Lifecycle: ``PENDING`` → ``IN_PROGRESS`` → ``EXECUTED`` | ``FAILED``
-"""
-
 import uuid
 from datetime import datetime
 
@@ -11,10 +6,10 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.enums import TimerStatus
-from src.models.base import Base
+from src.models.base import BaseModel
 
 
-class Timer(Base):
+class Timer(BaseModel):
     """A one-shot scheduled webhook.
 
     Attributes

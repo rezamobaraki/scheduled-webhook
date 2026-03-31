@@ -5,15 +5,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.core import Logger
 from src.core.errors import register_exception_handlers
-from src.core.logging import setup_logging
 from src.routers import timers_router
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup / shutdown hooks."""
-    setup_logging()
+    Logger.setup()
     yield
 
 

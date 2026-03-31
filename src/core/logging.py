@@ -1,10 +1,3 @@
-"""Structured logging configuration powered by ``structlog``.
-
-Call :func:`setup_logging` once during the application lifespan
-(FastAPI startup or Celery worker init) — **not** at module level —
-so tests and import ordering stay predictable.
-"""
-
 import logging
 import sys
 
@@ -13,33 +6,42 @@ from structlog.processors import JSONRenderer, TimeStamper, add_log_level
 from structlog.stdlib import LoggerFactory
 
 
-def setup_logging() -> structlog.stdlib.BoundLogger:
-    """Configure ``structlog`` with JSON output and return a root logger.
+class Logger:
+    """Structured logging powered by ``structlog``.
+    Usage:
 
-    * ISO-8601 timestamps for machine-parseable logs.
-    * JSON renderer for easy ``jq`` / log-aggregator consumption.
-    * Stdlib root handler wired to ``stdout`` (container best-practice).
+        from src.core.logging import Logger
+
+        Logger.setup()                      # once at startup
+        logger = Logger.get(__name__)       # per module
+        logger.info("timer created", timer_id="abc-123")
     """
-    structlog.configure(
-        processors=[
-            TimeStamper(fmt="iso"),
-            add_log_level,
-            JSONRenderer(),
-        ],
-        logger_factory=LoggerFactory(),
-    )
 
-    handler = logging.StreamHandler(sys.stdout)
-    root = logging.getLogger()
-    # Avoid duplicate handlers when called more than once (e.g. tests).
-    if not root.handlers:
-        root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    @classmethod
+    def setup(cls) -> None:
+        """
+        Configure structlog with JSON output.
+        Safe to call multiple times — stdlib handler guard prevents duplicate log lines.
+        """
+        structlog.configure(
+            processors=[
+                TimeStamper(fmt="iso"),
+                add_log_level,
+                JSONRenderer(),
+            ],
+            logger_factory=LoggerFactory(),
+        )
 
-    # Silence noisy third-party loggers
-    logging.getLogger("uvicorn.access").handlers.clear()
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+        root = logging.getLogger()
+        if not root.handlers:
+            root.addHandler(logging.StreamHandler(sys.stdout))
+        root.setLevel(logging.INFO)
 
-    return structlog.get_logger()
+        # Silence noisy third-party loggers
+        logging.getLogger("uvicorn.access").handlers.clear()
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
 
+    @classmethod
+    def get(cls, name: str | None = None) -> structlog.stdlib.BoundLogger:
+        return structlog.get_logger(name) if name else structlog.get_logger()

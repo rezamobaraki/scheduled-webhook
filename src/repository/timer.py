@@ -16,8 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from src.models import Timer
 from src.enums import TimerStatus
+from src.models import Timer
 
 
 class TimerRepository:
@@ -72,7 +72,9 @@ class SyncTimerRepository:
                 .where(Timer.status == TimerStatus.PENDING)
                 .where(Timer.scheduled_at <= datetime.now(UTC))
                 .limit(limit),
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def mark_executed(self, timer: Timer) -> None:
@@ -89,4 +91,3 @@ class SyncTimerRepository:
     def rollback(self) -> None:
         """Roll back the current transaction (releases any row locks)."""
         self._session.rollback()
-

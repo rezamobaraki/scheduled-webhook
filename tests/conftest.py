@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.core.config import settings
 from src.core.database import SyncSessionLocal, get_async_session
 from src.main import app
-from src.models import Base
+from src.models import BaseModel
 
 # ── Test-specific async engine (avoids event-loop mismatch) ──────────────────
 
@@ -34,9 +34,9 @@ _TestAsyncSessionLocal = async_sessionmaker(_test_async_engine, expire_on_commit
 def _create_tables():
     """Create tables once per test session; drop them at the end."""
     engine = create_engine(settings.db.sync_url)
-    Base.metadata.create_all(engine)
+    BaseModel.metadata.create_all(engine)
     yield
-    Base.metadata.drop_all(engine)
+    BaseModel.metadata.drop_all(engine)
     engine.dispose()
 
 
