@@ -44,7 +44,7 @@ FROM python:3.14-slim AS runtime
 LABEL org.opencontainers.image.title="Timer Service" \
       org.opencontainers.image.description="Delayed webhook execution service" \
       org.opencontainers.image.version="1.0.0" \
-      org.opencontainers.image.source="https://github.com/your-org/timer-service"
+      org.opencontainers.image.source="https://github.com/rezamobaraki/scheduled-webhook"
 
 # ── Environment hardening ────────────────────────────────────────────────────
 ENV PYTHONDONTWRITEBYTECODE=1 \
