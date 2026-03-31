@@ -42,14 +42,8 @@ class TimerService:
         return TimerCreateResponse(id=timer.id, time_left=request.total_seconds)
 
     async def retrieve_timer(self, timer_id: uuid.UUID) -> TimerRetrieveResponse:
-        timer = await self._get_timer(timer_id)
-        delta = (timer.scheduled_at - datetime.now(UTC)).total_seconds()
-        return TimerRetrieveResponse(id=timer.id, time_left=max(0, int(delta)))
-
-    async def _get_timer(self, timer_id: uuid.UUID) -> Timer:
-        """Fetch a timer by PK or raise ``TimerNotFoundError``."""
         timer = await self.timer_repository.get_by_id(timer_id)
         if not timer:
             raise TimerNotFoundError(str(timer_id))
-        return timer
-
+        delta = (timer.scheduled_at - datetime.now(UTC)).total_seconds()
+        return TimerRetrieveResponse(id=timer.id, time_left=max(0, int(delta)))
