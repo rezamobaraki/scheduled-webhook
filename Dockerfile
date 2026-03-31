@@ -19,7 +19,7 @@
 # ── Stage 1: Builder ─────────────────────────────────────────────────────────
 FROM python:3.14-slim AS builder
 
-WORKDIR /build
+WORKDIR /app
 
 # Install uv for fast, reproducible dependency resolution
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -57,10 +57,10 @@ RUN groupadd --system appgroup && \
     useradd  --system --gid appgroup --no-create-home appuser
 
 # ── Copy built artefacts from the builder stage ─────────────────────────────
-COPY --from=builder /build/.venv /app/.venv
-COPY --from=builder /build/src   /app/src
-COPY --from=builder /build/migrations /app/migrations
-COPY --from=builder /build/alembic.ini /app/alembic.ini
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src   /app/src
+COPY --from=builder /app/migrations /app/migrations
+COPY --from=builder /app/alembic.ini /app/alembic.ini
 
 # Put the virtual-env on PATH so `python`, `uvicorn`, `celery`, `alembic`
 # resolve to the installed versions without needing `uv run`.
@@ -73,5 +73,5 @@ EXPOSE 8000
 
 # ── Default entrypoint: API server ──────────────────────────────────────────
 # Healthchecks are defined per-service in docker-compose.yml since
-# api / worker / beat each need different probes.
+# backend / worker / beat each need different probes.
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

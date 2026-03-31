@@ -27,11 +27,13 @@ def _insert_timer(
     status: TimerStatus = TimerStatus.PENDING,
 ) -> Timer:
     """Insert a timer directly into the database."""
+    now = datetime.now(UTC)
     timer = Timer(
         id=uuid.uuid4(),
         url=_WEBHOOK_URL,
-        scheduled_at=datetime.now(UTC) - timedelta(seconds=seconds_ago),
-        executed_at=datetime.now(UTC) if status == TimerStatus.EXECUTED else None,
+        scheduled_at=now - timedelta(seconds=seconds_ago),
+        executed_at=now if status == TimerStatus.EXECUTED else None,
+        failed_at=now if status == TimerStatus.FAILED else None,
         status=status,
     )
     session.add(timer)
@@ -59,6 +61,9 @@ class TestFireWebhook:
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.EXECUTED
         assert timer.executed_at is not None
+        assert timer.failed_at is None
+        assert timer.attempt_count == 1
+        assert timer.last_error is None
 
     @patch("src.worker.tasks.webhook_service")
     def test_skips_already_executed_timer(self, mock_service, sync_session):
@@ -98,6 +103,10 @@ class TestFireWebhook:
         # After all retries exhausted the timer is marked failed.
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.FAILED
+        assert timer.failed_at is not None
+        assert timer.executed_at is None
+        assert timer.attempt_count >= 1
+        assert timer.last_error is not None
 
     @patch("src.worker.tasks.webhook_service")
     def test_retries_on_http_5xx(self, mock_service, sync_session):
@@ -114,6 +123,10 @@ class TestFireWebhook:
         assert mock_service.deliver.call_count == settings.webhook.max_retries + 1
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.FAILED
+        assert timer.failed_at is not None
+        assert timer.executed_at is None
+        assert timer.attempt_count >= 1
+        assert timer.last_error is not None
 
     def test_rejects_inconsistent_executed_state(self, sync_session):
         """The database must reject executed timers without ``executed_at``."""
@@ -122,6 +135,22 @@ class TestFireWebhook:
             url=_WEBHOOK_URL,
             scheduled_at=datetime.now(UTC) - timedelta(seconds=60),
             status=TimerStatus.EXECUTED,
+        )
+
+        sync_session.add(timer)
+
+        with pytest.raises(IntegrityError):
+            sync_session.commit()
+
+        sync_session.rollback()
+
+    def test_rejects_inconsistent_failed_state(self, sync_session):
+        """The database must reject failed timers without ``failed_at``."""
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=datetime.now(UTC) - timedelta(seconds=60),
+            status=TimerStatus.FAILED,
         )
 
         sync_session.add(timer)

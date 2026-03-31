@@ -20,7 +20,9 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - timer-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
       interval: 10s
@@ -36,7 +38,9 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redisdata:/data
+      - redis-data:/data
+    networks:
+      - timer-network
     command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -48,8 +52,8 @@ services:
     restart: unless-stopped
 
   # ── Application ────────────────────────────────────────────────────────────
-  api:
-    container_name: timer-api
+  backend:
+    container_name: timer-backend
     build: { context: ., target: runtime }
     env_file: .env
     environment:
@@ -57,6 +61,8 @@ services:
       REDIS_HOST: redis
     ports:
       - "8000:8000"
+    networks:
+      - timer-network
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -82,6 +88,8 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+    networks:
+      - timer-network
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -110,15 +118,17 @@ services:
     environment:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
+    networks:
+      - timer-network
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
     command: >
       celery -A src.worker.celery_app:celery_app
-      beat --loglevel=info
+      beat --loglevel=info --schedule /tmp/celerybeat-schedule
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' > /dev/null"]
+      test: ["CMD", "python", "-c", "from pathlib import Path; raise SystemExit(0 if Path('/tmp/celerybeat-schedule').exists() else 1)"]
       interval: 30s
       timeout: 5s
       start_period: 15s
@@ -127,6 +137,10 @@ services:
     logging: *json-logging
     restart: unless-stopped
 
+networks:
+  timer-network:
+    driver: bridge
+
 volumes:
-  pgdata:
-  redisdata:
+  postgres-data:
+  redis-data:

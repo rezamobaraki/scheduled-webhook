@@ -7,3 +7,5 @@ class AppSettings(BaseConfig):
     model_config = SettingsConfigDict(env_prefix="APP_")
 
     sweep_interval: float = 30.0
+    max_timer_seconds: int = 30 * 24 * 3600  # 30 days
+    max_url_length: int = 2048  # must match DB column: String(2048)

@@ -53,11 +53,12 @@ def fire_webhook(self, timer_id: str) -> None:
         timer = timer_repository.get_pending_for_update(uuid.UUID(timer_id))
 
         if timer is None:
-            logger.info(f"Timer {timer_id} already processed or unknown — skipping.")
+            logger.info(f"Timer {timer_id} already processed or unknown - skipping.")
             return
 
         # ── Claim ────────────────────────────────────────────────────
         timer.transition_to(TimerStatus.PROCESSING)
+        timer.attempt_count = self.request.retries + 1
         session.commit()
 
         # ── Deliver ──────────────────────────────────────────────────
@@ -68,10 +69,13 @@ def fire_webhook(self, timer_id: str) -> None:
                 f"Webhook {timer_id} failed"
                 f" (attempt {self.request.retries + 1}/{self.max_retries + 1}): {exc}"
             )
+            timer.last_error = str(exc)[:4096]
             if self.request.retries >= self.max_retries:
                 timer.transition_to(TimerStatus.FAILED)
+                timer.failed_at = datetime.now(UTC)
                 session.commit()
                 raise exc from None
+            session.commit()
             raise self.retry(
                 exc=exc,
                 countdown=2**self.request.retries * 5,
@@ -80,6 +84,7 @@ def fire_webhook(self, timer_id: str) -> None:
         # ── Finalise ─────────────────────────────────────────────────
         timer.transition_to(TimerStatus.EXECUTED)
         timer.executed_at = datetime.now(UTC)
+        timer.last_error = None
         session.commit()
         logger.info(f"Timer {timer_id} executed successfully.")
 
