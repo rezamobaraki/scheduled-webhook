@@ -38,10 +38,11 @@ POST /timer─▶  (source of truth)    │──dispatch─▶  (timely deliver
 Editable and shareable versions:
 
 - [Excalidraw source](docs/webhook-scheduler.excalidraw)
+- [SVG export](docs/webhook-scheduler.svg)
 - [PNG export](docs/webhook-scheduler.png)
 - [Open in Excalidraw](https://excalidraw.com/#json=pK7Fl0v2NO3CVn1t7sdH5,FglgSh9OEXgbiqEdiBvYyg)
 
-![Webhook Scheduler Diagram](docs/webhook-scheduler.png)
+![Webhook Scheduler Diagram](docs/webhook-scheduler.svg)
 
 | Concern | How it is solved |
 |---|---|
