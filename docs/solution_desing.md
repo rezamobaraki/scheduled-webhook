@@ -1,6 +1,6 @@
 # Solution Design
 
-This document describes a simple, readable design for the timer service based on the current codebase, the assignment, and the scheduling observations in `example.md`.
+This document describes a simple, readable design for the timer service based on the current codebase and the assignment.
 
 ## 0. Understanding
 
@@ -12,7 +12,7 @@ The problem is not only "delay a webhook". The system must also:
 - avoid firing the same timer more than once
 - scale across multiple API and worker instances
 
-The design used here follows the main idea from `example.md`:
+The design used here follows a two-layer scheduling approach:
 
 - Postgres is the source of truth
 - Redis/Celery is the execution layer for near-term timers
@@ -250,7 +250,7 @@ Design:
 - timers inside the next 5 minutes are sent to Celery with `eta=scheduled_at`
 - timers further in the future stay in Postgres until the dispatcher moves them into the near-term execution layer
 
-This is the main idea borrowed from `example.md`: do not push all future work into the broker immediately.
+The key design decision is to avoid pushing all future work into the broker immediately.
 
 #### Survive Restarts
 
