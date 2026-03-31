@@ -1,0 +1,65 @@
+"""Business logic for timer creation and retrieval.
+
+This layer orchestrates:
+
+* persistence   — via ``TimerRepository``
+* task dispatch — via Celery ``fire_webhook``
+* DTO mapping   — ``Timer`` model → Pydantic response
+
+The service never imports SQLAlchemy directly — all queries are
+delegated to the repository.
+"""
+
+import logging
+import uuid
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.models import Timer
+from src.repository import TimerRepository
+from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerGetResponse
+
+logger = logging.getLogger(__name__)
+
+
+class TimerService:
+    """Stateless service — one instance per request."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._repo = TimerRepository(session)
+
+    async def create_timer(self, req: TimerCreateRequest) -> TimerCreateResponse:
+        """Create a timer, persist it, and dispatch a Celery task.
+
+        Even if the broker is temporarily unreachable the timer is safe
+        in PostgreSQL — the periodic sweep will recover it.
+        """
+        total_seconds = req.total_seconds
+        scheduled_at = datetime.now(UTC) + timedelta(seconds=total_seconds)
+
+        timer = Timer(url=str(req.url), scheduled_at=scheduled_at)
+        timer = await self._repo.create(timer)
+
+        # Lazy import avoids circular deps and simplifies mocking in tests.
+        from src.worker.tasks import fire_webhook
+
+        try:
+            fire_webhook.apply_async(args=[str(timer.id)], eta=scheduled_at)
+        except Exception:
+            # Broker down — not fatal.  The sweep will recover this timer.
+            logger.warning(
+                "Broker unreachable — sweep will recover timer %s.", timer.id,
+            )
+
+        return TimerCreateResponse(id=timer.id, time_left=total_seconds)
+
+    async def get_timer(self, timer_id: uuid.UUID) -> TimerGetResponse | None:
+        """Return time remaining for *timer_id*, or ``None`` if not found."""
+        timer = await self._repo.get_by_id(timer_id)
+        if timer is None:
+            return None
+
+        delta = (timer.scheduled_at - datetime.now(UTC)).total_seconds()
+        return TimerGetResponse(id=timer.id, time_left=max(0, int(delta)))
+

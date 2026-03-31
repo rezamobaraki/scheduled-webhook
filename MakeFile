@@ -1,0 +1,48 @@
+.PHONY: run worker beat test lint fmt migrate infra clean
+
+# ── Development ──────────────────────────────────────────────────────────────
+
+run:  ## Start the FastAPI dev server
+	uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+
+worker:  ## Start Celery worker
+	uv run celery -A src.worker.celery_app:celery_app worker --loglevel=info
+
+beat:  ## Start Celery Beat scheduler
+	uv run celery -A src.worker.celery_app:celery_app beat --loglevel=info
+
+# ── Testing & Quality ────────────────────────────────────────────────────────
+
+test:  ## Run the test suite
+	uv run pytest -v
+
+lint:  ## Run ruff linter
+	uv run ruff check src tests
+
+fmt:  ## Auto-format code with ruff
+	uv run ruff format src tests
+	uv run ruff check --fix src tests
+
+# ── Database ─────────────────────────────────────────────────────────────────
+
+migrate:  ## Apply Alembic migrations
+	uv run alembic upgrade head
+
+# ── Infrastructure ───────────────────────────────────────────────────────────
+
+infra:  ## Start PostgreSQL and Redis in Docker
+	docker compose up postgres redis -d
+
+up:  ## Start the full stack via Docker Compose
+	docker compose up --build
+
+down:  ## Stop all Docker Compose services
+	docker compose down
+
+clean:  ## Remove Docker volumes (⚠ destroys data)
+	docker compose down -v
+
+help:  ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+

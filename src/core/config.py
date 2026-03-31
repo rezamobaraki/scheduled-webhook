@@ -1,33 +1,110 @@
-"""Application settings loaded from environment variables.
+"""Application configuration.
 
-Every setting is overridable via an ``APP_``-prefixed env var.
-Example: ``APP_DATABASE_URL=postgresql+asyncpg://...``
+Settings are loaded from environment variables (and ``.env`` file at project root).
+Each domain uses its own prefix so variables stay organised::
+
+    POSTGRES_HOST=localhost
+    REDIS_PORT=6379
+    WEBHOOK_TIMEOUT=10
+    APP_SWEEP_INTERVAL=30
 """
 
-from pydantic_settings import BaseSettings
+from pydantic import computed_field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    # PostgreSQL ── async driver for FastAPI, sync driver for Celery workers.
-    database_url: str = (
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/timers"
+class DatabaseSettings(BaseSettings):
+    """PostgreSQL connection configuration.
+
+    Env-var prefix: ``POSTGRES_``
+    Connection URLs are derived automatically from individual components
+    so that credentials are never hard-coded as a monolithic string.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="POSTGRES_", env_file=".env", extra="ignore",
     )
-    sync_database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/timers"
+
+    host: str
+    port: int = 5432
+    user: str
+    password: str
+    db: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def async_url(self) -> str:
+        """``asyncpg`` URL used by FastAPI request handlers."""
+        return (
+            f"postgresql+asyncpg://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.db}"
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sync_url(self) -> str:
+        """``psycopg`` URL used by Celery worker tasks."""
+        return (
+            f"postgresql+psycopg://{self.user}:{self.password}"
+            f"@{self.host}:{self.port}/{self.db}"
+        )
+
+
+class RedisSettings(BaseSettings):
+    """Redis broker configuration.
+
+    Env-var prefix: ``REDIS_``
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="REDIS_", env_file=".env", extra="ignore",
     )
 
-    # Redis ── used as the Celery message broker.
-    redis_url: str = "redis://localhost:6379/0"
+    host: str
+    port: int = 6379
+    db: int = 0
 
-    # Webhook delivery
-    webhook_timeout: int = 10  # seconds per HTTP call
-    webhook_max_retries: int = 3  # retries before marking "failed"
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def url(self) -> str:
+        """Full Redis connection URL."""
+        return f"redis://{self.host}:{self.port}/{self.db}"
 
-    # Recovery sweep interval (seconds).  A Celery Beat task re-dispatches
-    # any overdue timers that the broker may have lost.
+
+class WebhookSettings(BaseSettings):
+    """Webhook delivery configuration.
+
+    Env-var prefix: ``WEBHOOK_``
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="WEBHOOK_", env_file=".env", extra="ignore",
+    )
+
+    timeout: int = 10
+    max_retries: int = 3
+
+
+class AppSettings(BaseSettings):
+    """General application-level settings.
+
+    Env-var prefix: ``APP_``
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_", env_file=".env", extra="ignore",
+    )
+
     sweep_interval: float = 30.0
 
-    model_config = {"env_prefix": "APP_"}
+
+class Settings:
+    """Root container that groups every domain-specific setting block."""
+
+    app: AppSettings = AppSettings()
+    db: DatabaseSettings = DatabaseSettings()
+    redis: RedisSettings = RedisSettings()
+    webhook: WebhookSettings = WebhookSettings()
 
 
 settings = Settings()

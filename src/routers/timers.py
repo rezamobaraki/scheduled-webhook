@@ -9,9 +9,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_async_session
-from app.schemas import TimerCreateRequest, TimerCreateResponse, TimerGetResponse
-from app.services.timer_service import TimerService
+from src.core.database import get_async_session
+from src.schemas import TimerCreateRequest, TimerCreateResponse, TimerGetResponse
+from src.services import TimerService
 
 router = APIRouter(prefix="/timer", tags=["timers"])
 
