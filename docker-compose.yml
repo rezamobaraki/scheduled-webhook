@@ -51,6 +51,21 @@ services:
     logging: *json-logging
     restart: unless-stopped
 
+  migrate:
+    container_name: timer-migrate
+    build: { context: ., target: runtime }
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+    networks:
+      - timer-network
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: alembic upgrade head
+    init: true
+    logging: *json-logging
+    restart: "no"
+
   # ── Application ────────────────────────────────────────────────────────────
   backend:
     container_name: timer-backend
@@ -66,9 +81,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
-    command: >
-      sh -c "alembic upgrade head &&
-             uvicorn src.main:app --host 0.0.0.0 --port 8000"
+      migrate:  { condition: service_completed_successfully }
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -93,6 +107,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+      migrate:  { condition: service_completed_successfully }
     command: >
       celery -A src.worker.celery_app:celery_app
       worker --loglevel=info --concurrency=4
@@ -123,6 +138,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+      migrate:  { condition: service_completed_successfully }
     command: >
       celery -A src.worker.celery_app:celery_app
       beat --loglevel=info --schedule /tmp/celerybeat-schedule
