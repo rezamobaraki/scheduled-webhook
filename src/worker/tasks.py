@@ -16,10 +16,10 @@ concurrent execution.
 
 import httpx
 
-from core import Logger
-from core.configs import settings
+from src.core import Logger
+from src.core.configs import settings
 from src.core.database import SyncSessionLocal
-from src.repository import SyncTimerRepository
+from src.repository import SyncTimerRepository, TimerSyncInterface
 from src.worker.celery_app import celery_app
 
 logger = Logger.get(__name__)
@@ -42,8 +42,8 @@ def fire_webhook(self, timer_id: str) -> None:
     * **Failure**: after ``max_retries`` the timer is marked ``FAILED``.
     """
     with SyncSessionLocal() as session:
-        repo = SyncTimerRepository(session)
-        timer = repo.get_pending_for_update(timer_id)
+        timer_repository: TimerSyncInterface = SyncTimerRepository(session)
+        timer = timer_repository.get_pending_for_update(timer_id)
 
         if timer is None:
             logger.info("Timer %s already processed or unknown — skipping.", timer_id)
@@ -57,7 +57,7 @@ def fire_webhook(self, timer_id: str) -> None:
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            repo.rollback()  # release row lock so next attempt can acquire it
+            timer_repository.rollback()  # release row lock so next attempt can acquire it
             logger.warning(
                 "Webhook %s failed (attempt %d/%d): %s",
                 timer_id,
@@ -67,16 +67,16 @@ def fire_webhook(self, timer_id: str) -> None:
             )
             if self.request.retries >= self.max_retries:
                 # All retries exhausted — mark permanently failed.
-                timer = repo.get_pending_for_update(timer_id)
+                timer = timer_repository.get_pending_for_update(timer_id)
                 if timer is not None:
-                    repo.mark_failed(timer)
+                    timer_repository.mark_failed(timer)
                 raise
             raise self.retry(
                 exc=exc,
                 countdown=2**self.request.retries * 5,  # 5 s, 10 s, 20 s …
             )
 
-        repo.mark_executed(timer)
+        timer_repository.mark_executed(timer)
         logger.info("Timer %s executed successfully.", timer_id)
 
 
@@ -89,8 +89,8 @@ def sweep_overdue_timers() -> None:
     locking, so duplicate dispatches are harmless.
     """
     with SyncSessionLocal() as session:
-        repo = SyncTimerRepository(session)
-        overdue = repo.get_overdue_pending()
+        timer_repository: TimerSyncInterface = SyncTimerRepository(session)
+        overdue = timer_repository.get_overdue_pending()
 
         for timer in overdue:
             fire_webhook.delay(str(timer.id))

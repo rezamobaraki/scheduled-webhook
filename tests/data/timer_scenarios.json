@@ -1,0 +1,171 @@
+{
+  "create_timer": {
+    "valid": [
+      {
+        "id": "basic_delay",
+        "description": "Simple 120-second timer",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 120, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 120
+      },
+      {
+        "id": "complex_duration",
+        "description": "Mixed hours + minutes + seconds",
+        "payload": {"hours": 1, "minutes": 30, "seconds": 45, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 5445
+      },
+      {
+        "id": "zero_delay",
+        "description": "Zero delay — fires immediately",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 0
+      },
+      {
+        "id": "all_zeros_explicit",
+        "description": "Boundary: all fields explicitly zero",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 0, "url": "https://httpbin.org/post"},
+        "expected_status": 201,
+        "expected_time_left": 0
+      },
+      {
+        "id": "max_boundary",
+        "description": "Boundary: exactly 30 days (maximum allowed)",
+        "payload": {"hours": 720, "minutes": 0, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 2592000
+      },
+      {
+        "id": "only_hours",
+        "description": "Only hours, rest zero",
+        "payload": {"hours": 2, "minutes": 0, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 7200
+      },
+      {
+        "id": "only_minutes",
+        "description": "Only minutes, rest zero",
+        "payload": {"hours": 0, "minutes": 45, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 2700
+      },
+      {
+        "id": "only_seconds",
+        "description": "Only seconds, rest zero",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 300, "url": "https://example.com/hook"},
+        "expected_status": 201,
+        "expected_time_left": 300
+      }
+    ],
+    "invalid": [
+      {
+        "id": "negative_hours",
+        "description": "Negative hours rejected",
+        "payload": {"hours": -1, "minutes": 0, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "negative_minutes",
+        "description": "Negative minutes rejected",
+        "payload": {"hours": 0, "minutes": -1, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "negative_seconds",
+        "description": "Negative seconds rejected",
+        "payload": {"hours": 0, "minutes": 0, "seconds": -5, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "invalid_url",
+        "description": "Malformed URL rejected",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 10, "url": "not-a-url"},
+        "expected_status": 422
+      },
+      {
+        "id": "missing_url",
+        "description": "Missing url field rejected",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 10},
+        "expected_status": 422
+      },
+      {
+        "id": "missing_hours",
+        "description": "Missing hours field rejected",
+        "payload": {"minutes": 0, "seconds": 10, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "missing_minutes",
+        "description": "Missing minutes field rejected",
+        "payload": {"hours": 0, "seconds": 10, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "missing_seconds",
+        "description": "Missing seconds field rejected",
+        "payload": {"hours": 0, "minutes": 0, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "exceeds_max_duration",
+        "description": "Over 30-day limit rejected",
+        "payload": {"hours": 721, "minutes": 0, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "boundary_over_max",
+        "description": "Exactly 30 days + 1 second rejected",
+        "payload": {"hours": 720, "minutes": 0, "seconds": 1, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "empty_body",
+        "description": "Empty JSON object rejected",
+        "payload": {},
+        "expected_status": 422
+      },
+      {
+        "id": "string_instead_of_int",
+        "description": "Wrong type for numeric field",
+        "payload": {"hours": "two", "minutes": 0, "seconds": 0, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "float_seconds",
+        "description": "Float instead of int rejected",
+        "payload": {"hours": 0, "minutes": 0, "seconds": 1.5, "url": "https://example.com/hook"},
+        "expected_status": 422
+      },
+      {
+        "id": "null_body",
+        "description": "Null JSON body rejected",
+        "payload": null,
+        "expected_status": 422
+      }
+    ]
+  },
+  "retrieve_timer": {
+    "invalid_ids": [
+      {
+        "id": "bad_uuid_format",
+        "description": "Non-UUID string in path",
+        "path": "/timer/not-a-uuid",
+        "expected_status": 422
+      },
+      {
+        "id": "empty_id",
+        "description": "Empty string as timer ID — FastAPI redirects trailing slash",
+        "path": "/timer/",
+        "expected_status": 307
+      },
+      {
+        "id": "numeric_id",
+        "description": "Plain integer instead of UUID",
+        "path": "/timer/12345",
+        "expected_status": 422
+      }
+    ]
+  }
+}
+

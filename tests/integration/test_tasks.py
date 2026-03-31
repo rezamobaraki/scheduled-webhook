@@ -1,7 +1,7 @@
-"""Tests for Celery worker tasks.
+"""Integration tests for Celery tasks — requires PostgreSQL via Docker.
 
-These exercise the business logic inside the tasks using sync sessions
-and mocked HTTP calls.  No real Celery broker is involved.
+HTTP is mocked — these tests verify the task → repository → DB round-trip
+plus retry and sweep logic.
 """
 
 import uuid
@@ -11,9 +11,9 @@ from unittest.mock import patch
 import httpx
 from sqlalchemy.orm import Session
 
-from src.core.config import settings
-from src.models import Timer
+from src.core.configs import settings
 from src.enums import TimerStatus
+from src.models import Timer
 
 _WEBHOOK_URL = "https://example.com/webhook"
 
@@ -23,14 +23,11 @@ def _make_response(status_code: int = 200) -> httpx.Response:
     return httpx.Response(status_code, request=httpx.Request("POST", _WEBHOOK_URL))
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
 def _insert_timer(
     session: Session,
     *,
     seconds_ago: int = 60,
-    status: str = TimerStatus.PENDING,
+    status: TimerStatus = TimerStatus.PENDING,
 ) -> Timer:
     """Insert a timer directly into the database."""
     timer = Timer(
@@ -107,6 +104,25 @@ class TestFireWebhook:
         sync_session.refresh(timer)
         assert timer.status == TimerStatus.FAILED
 
+    @patch("src.worker.tasks.httpx.post")
+    def test_retries_on_http_5xx(self, mock_post, sync_session):
+        """HTTP 500 from the webhook target triggers retry."""
+        from src.worker.tasks import fire_webhook
+
+        timer = _insert_timer(sync_session)
+        error_resp = _make_response(500)
+        mock_post.side_effect = httpx.HTTPStatusError(
+            "Internal Server Error",
+            request=error_resp.request,
+            response=error_resp,
+        )
+
+        fire_webhook.apply(args=[str(timer.id)])
+
+        assert mock_post.call_count == settings.webhook.max_retries + 1
+        sync_session.refresh(timer)
+        assert timer.status == TimerStatus.FAILED
+
 
 # ── sweep_overdue_timers ─────────────────────────────────────────────────────
 
@@ -125,7 +141,7 @@ class TestSweep:
         # Future timer — must NOT be dispatched
         future = Timer(
             id=uuid.uuid4(),
-            url="https://example.com/webhook",
+            url=_WEBHOOK_URL,
             scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             status=TimerStatus.PENDING,
         )
@@ -145,6 +161,17 @@ class TestSweep:
         from src.worker.tasks import sweep_overdue_timers
 
         _insert_timer(sync_session, seconds_ago=60, status=TimerStatus.EXECUTED)
+
+        sweep_overdue_timers()
+
+        mock_delay.assert_not_called()
+
+    @patch("src.worker.tasks.fire_webhook.delay")
+    def test_ignores_failed_timers(self, mock_delay, sync_session):
+        """Sweep must skip timers that are permanently failed."""
+        from src.worker.tasks import sweep_overdue_timers
+
+        _insert_timer(sync_session, seconds_ago=60, status=TimerStatus.FAILED)
 
         sweep_overdue_timers()
 

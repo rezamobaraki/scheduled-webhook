@@ -1,0 +1,7 @@
+from enum import StrEnum
+
+
+class ErrorCode(StrEnum):
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    TIMER_NOT_FOUND = "TIMER_NOT_FOUND"
+    VALIDATION_ERROR = "VALIDATION_ERROR"
