@@ -28,8 +28,8 @@ tasks call `session.commit()` explicitly after the full operation succeeds.
 | **Flexibility** | PK-only — cannot add filters | Arbitrary WHERE clauses |
 
 **Decision:** Use `Session.get()` for simple PK lookups (e.g. `get_by_id`).
-Use `select()` when additional filters are needed (e.g. `get_pending_for_update`
-adds `WHERE status = 'pending'`).
+Use `select()` when additional filters are needed (e.g. `get_for_update`
+adds `WHERE status IN ('pending', 'processing')`).
 
 ---
 

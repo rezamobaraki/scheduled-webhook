@@ -45,7 +45,7 @@ class Timer(StateMixin, BaseModel):
     _state_field = "status"
     _allowed_transitions: ClassVar[dict[TimerStatus, set[TimerStatus]]] = {
         TimerStatus.PENDING: {TimerStatus.PROCESSING},
-        TimerStatus.PROCESSING: {TimerStatus.EXECUTED, TimerStatus.FAILED},
+        TimerStatus.PROCESSING: {TimerStatus.PROCESSING, TimerStatus.EXECUTED, TimerStatus.FAILED},
     }
 
     id: Mapped[uuid.UUID] = mapped_column(

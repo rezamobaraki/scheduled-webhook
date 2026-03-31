@@ -37,12 +37,12 @@ webhook_service = WebhookService()
     acks_late=True,
 )
 def fire_webhook(self, timer_id: str) -> None:
-    """Claim a pending timer, deliver the webhook, and finalise state.
+    """Claim a retryable timer, deliver the webhook, and finalise state.
 
     Guarantees
     ----------
-    * **Exactly-once**: ``SELECT … FOR UPDATE`` + ``WHERE status='pending'``
-      ensures only one worker can claim the timer.
+    * **Exactly-once**: ``SELECT … FOR UPDATE`` + status filter ensures
+      only one worker can claim the timer.
     * **Retry**: on delivery failure the task retries with exponential
       back-off (5 s → 10 s → 20 s …).
     * **Failure**: after ``max_retries`` the timer is marked ``FAILED``.
@@ -50,7 +50,7 @@ def fire_webhook(self, timer_id: str) -> None:
 
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
-        timer = timer_repository.get_pending_for_update(uuid.UUID(timer_id))
+        timer = timer_repository.get_for_update(uuid.UUID(timer_id))
 
         if timer is None:
             logger.info(f"Timer {timer_id} already processed or unknown - skipping.")
