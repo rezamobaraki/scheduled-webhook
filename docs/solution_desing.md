@@ -54,6 +54,7 @@ The core entity is `Timer`.
 - `id`: unique timer identifier
 - `url`: webhook target
 - `scheduled_at`: exact execution timestamp in UTC
+- `dispatched_at`: timestamp set when the timer is first sent to the broker; `NULL` means not yet dispatched
 - `status`: lifecycle state
 - `attempt_count`: delivery attempt counter
 - `last_error`: last delivery failure reason
@@ -125,10 +126,10 @@ Response:
 
 1. Client calls `POST /timer`.
 2. FastAPI validates input and computes `scheduled_at = now + delay`.
-3. The timer is inserted into Postgres with status `pending`.
-4. If the timer is due within 5 minutes, it is sent directly to Redis/Celery with `eta=scheduled_at`.
+3. The timer is inserted into Postgres with status `pending` and `dispatched_at = NULL`.
+4. If the timer is due within 5 minutes, it is sent directly to Redis/Celery with `eta=scheduled_at` and `dispatched_at` is stamped immediately.
 5. If the timer is due later than 5 minutes, it stays only in Postgres for now.
-6. Every 5 minutes, `dispatch_upcoming_timers` scans Postgres for `pending` timers due in the next 5 minutes and publishes them to Redis/Celery with `eta=scheduled_at`.
+6. Every 5 minutes, `dispatch_upcoming_timers` scans Postgres for `pending` timers with `dispatched_at IS NULL` that are due in the next 5 minutes, publishes them to Redis/Celery with `eta=scheduled_at`, and stamps `dispatched_at`. Timers already dispatched are skipped.
 7. When the ETA is reached, a Celery worker runs `fire_webhook(timer_id)`.
 8. The worker locks the timer row with `SELECT ... FOR UPDATE`.
 9. If the timer is already `executed` or `failed`, the worker skips it.
@@ -136,11 +137,12 @@ Response:
 
 ### Recovery Flow
 
-1. Every 60 seconds, `sweep_overdue_timers` queries overdue `pending` or `processing` timers.
-2. These timers are re-dispatched to Celery immediately.
-3. `fire_webhook` re-checks the current timer state under row lock and only one worker is allowed to continue.
-
-This recovery path is what makes the design resilient to broker outages, worker crashes, and missed dispatch windows.
+1. Every 60 seconds, `sweep_overdue_timers` queries overdue timers that are eligible for re-dispatch:
+   - `pending` timers whose `scheduled_at` has passed.
+   - `processing` timers whose `dispatched_at` is older than the stale threshold (default 120 s), indicating a worker crash.
+2. These timers are re-dispatched to Celery and `dispatched_at` is re-stamped.
+3. Fresh `processing` timers (dispatched within the last 120 s) are left alone — they are being actively handled by a worker.
+4. `fire_webhook` re-checks the current timer state under row lock and only one worker is allowed to continue.
 
 ### Simple Diagram 1. System Architecture
 
@@ -305,6 +307,11 @@ Primary goal in this section: satisfy the non-functional requirements.
 - This is the core exactly-once mechanism.
 - Only one worker can actively hold the row at a time.
 - The overdue sweep uses `skip_locked=True` so concurrent sweep executions do not block each other.
+- `dispatched_at` prevents the dispatcher from re-publishing timers that are already in the broker queue.
+  The query filters `WHERE dispatched_at IS NULL`, so only genuinely un-dispatched timers are picked up.
+- The sweep applies a stale threshold: `processing` timers are only re-dispatched when
+  `dispatched_at < now - processing_stale_threshold` (default 120 s), distinguishing a live worker
+  from a crashed one.
 
 ### Simple Diagram 3. Recovery and Exactly-once
 
@@ -383,7 +390,9 @@ If this service had to evolve beyond the assignment, these would be the next imp
 
 ### Reliability
 
-- Add a transactional outbox so broker publishing is coupled more safely to the database commit.
+- For a higher-traffic production system, replace the direct `apply_async` calls with a transactional outbox:
+  write dispatch intent to an `outbox` table in the same DB transaction as the timer state change,
+  then relay to the broker asynchronously. This eliminates the DB/broker dual-write entirely.
 - Add dead-letter handling for permanently failing webhook targets.
 - Consider Redis Sentinel, Kafka, RabbitMQ, or SQS for stronger broker availability guarantees.
 

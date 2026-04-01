@@ -214,8 +214,63 @@ class TestSweep:
 
         mock_delay.assert_not_called()
 
+    @patch("src.worker.tasks.fire_webhook.delay")
+    def test_skips_fresh_processing_timers(self, mock_delay, sync_session):
+        """PROCESSING timers dispatched recently must NOT be re-dispatched."""
+        from src.worker.tasks import sweep_overdue_timers
+
+        now = datetime.now(UTC)
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now - timedelta(seconds=30),
+            status=TimerStatus.PROCESSING,
+            dispatched_at=now - timedelta(seconds=30),  # dispatched 30s ago — fresh
+        )
+        sync_session.add(timer)
+        sync_session.commit()
+
+        sweep_overdue_timers()
+
+        mock_delay.assert_not_called()
+
+    @patch("src.worker.tasks.fire_webhook.delay")
+    def test_redispatches_stale_processing_timers(self, mock_delay, sync_session):
+        """PROCESSING timers older than the stale threshold must be recovered."""
+        from src.worker.tasks import sweep_overdue_timers
+
+        now = datetime.now(UTC)
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now - timedelta(seconds=300),
+            status=TimerStatus.PROCESSING,
+            dispatched_at=now - timedelta(seconds=300),  # dispatched 5 min ago — stale
+        )
+        sync_session.add(timer)
+        sync_session.commit()
+
+        sweep_overdue_timers()
+
+        dispatched = {c.args[0] for c in mock_delay.call_args_list}
+        assert str(timer.id) in dispatched
+
+    @patch("src.worker.tasks.fire_webhook.delay")
+    def test_stamps_dispatched_at_on_sweep(self, mock_delay, sync_session):
+        """Sweep must update dispatched_at when re-dispatching."""
+        from src.worker.tasks import sweep_overdue_timers
+
+        timer = _insert_timer(sync_session, seconds_ago=120)
+        assert timer.dispatched_at is None
+
+        sweep_overdue_timers()
+
+        sync_session.refresh(timer)
+        assert timer.dispatched_at is not None
+
 
 # ── dispatch_upcoming_timers ─────────────────────────────────────────────────
+
 
 class TestDispatcher:
     """Tests for the ``dispatch_upcoming_timers`` windowed dispatcher task."""
@@ -325,3 +380,43 @@ class TestDispatcher:
         call_kwargs = mock_apply.call_args.kwargs
         assert call_kwargs["eta"] == timer.scheduled_at
 
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_skips_already_dispatched_timers(self, mock_apply, sync_session):
+        """Timers with dispatched_at set must not be re-dispatched."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        now = datetime.now(UTC)
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now + timedelta(minutes=2),
+            status=TimerStatus.PENDING,
+            dispatched_at=now,  # already dispatched
+        )
+        sync_session.add(timer)
+        sync_session.commit()
+
+        dispatch_upcoming_timers()
+
+        mock_apply.assert_not_called()
+
+    @patch("src.worker.tasks.fire_webhook.apply_async")
+    def test_stamps_dispatched_at_after_dispatch(self, mock_apply, sync_session):
+        """Dispatcher must stamp dispatched_at on timers it sends."""
+        from src.worker.tasks import dispatch_upcoming_timers
+
+        now = datetime.now(UTC)
+        timer = Timer(
+            id=uuid.uuid4(),
+            url=_WEBHOOK_URL,
+            scheduled_at=now + timedelta(minutes=2),
+            status=TimerStatus.PENDING,
+        )
+        sync_session.add(timer)
+        sync_session.commit()
+        assert timer.dispatched_at is None
+
+        dispatch_upcoming_timers()
+
+        sync_session.refresh(timer)
+        assert timer.dispatched_at is not None

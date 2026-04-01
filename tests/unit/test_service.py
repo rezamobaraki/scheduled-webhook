@@ -57,6 +57,7 @@ class TestCreateTimer:
             assert resp.time_left == 120
             assert resp.id in repo._store
             mock_task.apply_async.assert_called_once()
+            assert repo._store[resp.id].dispatched_at is not None
 
     async def test_survives_broker_failure(self):
         """Timer is persisted even when the broker is unreachable."""
@@ -72,6 +73,8 @@ class TestCreateTimer:
             resp = await service.create_timer(req)
 
             assert resp.id in repo._store  # timer was saved despite broker failure
+            # dispatched_at must NOT be stamped when broker fails
+            assert repo._store[resp.id].dispatched_at is None
 
     async def test_zero_delay_returns_zero(self):
         fake_module, _mock_task = _mock_tasks_module()

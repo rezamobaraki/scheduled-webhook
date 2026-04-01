@@ -83,6 +83,11 @@ class Timer(StateMixin, BaseModel):
         nullable=False,
     )
 
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+
     # ── Operational metadata ─────────────────────────────────────────
     attempt_count: Mapped[int] = mapped_column(
         Integer,

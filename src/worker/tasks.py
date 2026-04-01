@@ -67,9 +67,7 @@ def fire_webhook(self, timer_id: str) -> None:
 
         # ── Guard: skip already-finalised timers ─────────────────────
         if timer.status in (TimerStatus.EXECUTED, TimerStatus.FAILED):
-            logger.info(
-                f"Timer {timer_id} already {timer.status.value}, skipping."
-            )
+            logger.info(f"Timer {timer_id} already {timer.status.value}, skipping.")
             return
 
         # ── Claim ────────────────────────────────────────────────────
@@ -110,9 +108,9 @@ def dispatch_upcoming_timers() -> None:
     """Periodic windowed dispatcher (Layer 1).
 
     Query Postgresql for ``pending`` timers whose ``scheduled_at`` falls
-    within the next dispatch window and send each to Redis with an
-    appropriate ETA.  ``fire_webhook`` handles de-duplication via row
-    locking, so duplicate dispatches are harmless.
+    within the next dispatch window and that have not already been
+    dispatched.  Each is sent to Redis with an appropriate ETA and
+    stamped with ``dispatched_at`` to prevent re-dispatch.
     """
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
@@ -125,8 +123,10 @@ def dispatch_upcoming_timers() -> None:
                 args=[str(timer.id)],
                 eta=timer.scheduled_at,
             )
+            timer.dispatched_at = datetime.now(UTC)
 
         if upcoming:
+            session.commit()
             logger.info(f"Dispatcher sent {len(upcoming)} upcoming timer(s) to broker.")
 
 
@@ -134,17 +134,22 @@ def dispatch_upcoming_timers() -> None:
 def sweep_overdue_timers() -> None:
     """Periodic safety-net (Layer 1b).
 
-    Query Postgresql for overdue ``pending`` / ``processing`` timers and
-    re-dispatch them into the broker.  ``fire_webhook`` handles
-    de-duplication via row locking, so duplicate dispatches are harmless.
+    Query Postgresql for overdue ``pending`` timers and ``processing``
+    timers that have been stuck longer than the stale threshold, then
+    re-dispatch them.  Stamps ``dispatched_at`` on re-dispatch.
     """
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
         now = datetime.now(UTC)
-        overdue = timer_repository.get_overdue_for_update(now)
+        overdue = timer_repository.get_overdue_for_update(
+            now,
+            stale_threshold=settings.app.processing_stale_threshold,
+        )
 
         for timer in overdue:
             fire_webhook.delay(str(timer.id))
+            timer.dispatched_at = datetime.now(UTC)
 
         if overdue:
+            session.commit()
             logger.info(f"Sweep dispatched {len(overdue)} overdue timer(s).")

@@ -32,16 +32,14 @@ class TimerService:
 
         # Only dispatch immediately if due within the dispatch window.
         if request.total_seconds <= settings.app.dispatch_window:
-            # Lazy import avoids circular deps and simplifies mocking in tests.
             from src.worker.tasks import fire_webhook
 
             try:
                 fire_webhook.apply_async(args=[str(timer.id)], eta=scheduled_at)
+                timer.dispatched_at = datetime.now(UTC)
             except Exception:
                 # Broker down — not fatal.  The sweep will recover this timer.
-                logger.warning(
-                    f"Broker unreachable — sweep will recover timer {timer.id!s}."
-                )
+                logger.warning(f"Broker unreachable — sweep will recover timer {timer.id!s}.")
 
         return TimerCreateResponse(id=timer.id, time_left=request.total_seconds)
 

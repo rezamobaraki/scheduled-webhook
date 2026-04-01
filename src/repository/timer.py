@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -47,9 +47,7 @@ class SyncTimerRepository(TimerSyncInterface):
         application code (``fire_webhook``) for clarity and robustness.
         """
         return self._session.execute(
-            select(Timer)
-            .where(Timer.id == timer_id)
-            .with_for_update(),
+            select(Timer).where(Timer.id == timer_id).with_for_update(),
         ).scalar_one_or_none()
 
     def get_upcoming_pending(
@@ -59,16 +57,14 @@ class SyncTimerRepository(TimerSyncInterface):
         limit: int = 500,
     ) -> list[Timer]:
         """Return pending timers whose ``scheduled_at`` falls within the
-        dispatch window (``now`` < ``scheduled_at`` <= ``window_end``).
-
-        These timers have not yet been dispatched to the broker.  No row
-        lock is needed — ``fire_webhook`` handles de-duplication via its
-        own ``SELECT … FOR UPDATE``.
+        dispatch window (``now`` < ``scheduled_at`` <= ``window_end``)
+        and that have not already been dispatched to the broker.
         """
         return list(
             self._session.execute(
                 select(Timer)
                 .where(Timer.status == TimerStatus.PENDING)
+                .where(Timer.dispatched_at.is_(None))
                 .where(Timer.scheduled_at > now)
                 .where(Timer.scheduled_at <= window_end)
                 .order_by(Timer.scheduled_at.asc())
@@ -81,18 +77,36 @@ class SyncTimerRepository(TimerSyncInterface):
     def get_overdue_for_update(
         self,
         now: datetime,
+        stale_threshold: int = 120,
         limit: int = 500,
     ) -> list[Timer]:
-        """Return up to *limit* pending timers whose scheduled time has passed.
+        """Return up to *limit* overdue timers eligible for re-dispatch.
+
+        Eligible timers are:
+        * ``PENDING`` whose ``scheduled_at`` has passed.
+        * ``PROCESSING`` whose ``dispatched_at`` is older than
+          *stale_threshold* seconds (i.e. likely stuck after a crash).
 
         ``skip_locked=True`` lets concurrent sweep tasks partition work
         without blocking each other.
         """
+        stale_cutoff = datetime.fromtimestamp(
+            now.timestamp() - stale_threshold,
+            tz=now.tzinfo,
+        )
         return list(
             self._session.execute(
                 select(Timer)
-                .where(Timer.status.in_([TimerStatus.PENDING, TimerStatus.PROCESSING]))
                 .where(Timer.scheduled_at <= now)
+                .where(
+                    or_(
+                        Timer.status == TimerStatus.PENDING,
+                        (
+                            (Timer.status == TimerStatus.PROCESSING)
+                            & (Timer.dispatched_at <= stale_cutoff)
+                        ),
+                    )
+                )
                 .order_by(Timer.scheduled_at.asc())
                 .limit(limit)
                 .with_for_update(skip_locked=True),

@@ -21,6 +21,7 @@ class TimerSyncInterface(Protocol):
     def get_overdue_for_update(
         self,
         now: datetime,
+        stale_threshold: int = 120,
         limit: int = 500,
     ) -> list[Timer]: ...
     def flush(self) -> None: ...

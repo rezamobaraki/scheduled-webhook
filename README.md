@@ -49,7 +49,8 @@ Editable and shareable versions:
 | **Persistence** | Postgresql stores every timer before it enters the broker |
 | **Precision** | Celery `apply_async(eta=…)` executes near the scheduled instant |
 | **Future scheduling** | Beat dispatches `pending` timers due in the next 5 minutes |
-| **Restart recovery** | Beat sweeps every 60 s for overdue `pending` / `processing` timers |
+| **Duplicate dispatch** | `dispatched_at` column — Beat and API stamp it on first dispatch; query filters `WHERE dispatched_at IS NULL` |
+| **Restart recovery** | Beat sweeps every 60 s for overdue `pending` timers and `processing` timers older than the stale threshold |
 | **Exactly-once** | `SELECT … FOR UPDATE` + state check inside `fire_webhook` |
 | **Horizontal scale** | Stateless API replicas · competing Celery workers |
 | **Retry** | Exponential back-off (5 s → 10 s → 20 s), then `FAILED` |
@@ -165,6 +166,7 @@ Nothing is hardcoded — each domain has its own prefix:
 | `APP_DISPATCH_WINDOW` | `300` | Timers due within this window are sent to Celery immediately |
 | `APP_DISPATCH_INTERVAL` | `300` | Seconds between Beat scans for the next dispatch window |
 | `APP_SWEEP_INTERVAL` | `60` | Seconds between overdue-timer recovery sweeps |
+| `APP_PROCESSING_STALE_THRESHOLD` | `120` | Seconds before a `processing` timer is considered stuck and re-dispatched |
 
 ## API Usage
 
@@ -218,9 +220,9 @@ Only **one** Beat instance should run (it is the sweep coordinator).
 - Webhooks are called with a **10-second timeout**.
 - Failed webhooks are retried **3 times** with exponential back-off before
   being marked `FAILED`.
-- Timers due within the next **5 minutes** are pushed to Celery immediately.
-- Beat scans Postgres every **5 minutes** for newly eligible future timers.
-- The overdue recovery sweep runs every **60 seconds**.
+- Timers due within the next **5 minutes** are pushed to Celery immediately and stamped with `dispatched_at`.
+- Beat scans Postgres every **5 minutes** for newly eligible future timers (`WHERE dispatched_at IS NULL`).
+- The overdue recovery sweep runs every **60 seconds**; `processing` timers are only re-dispatched after **120 seconds** (stale threshold) to avoid contending with active workers.
 
 ## Delivery Semantics
 
