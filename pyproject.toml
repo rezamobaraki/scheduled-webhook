@@ -46,19 +46,19 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = [
-    "E",      # PEP8 errors
-    "W",      # PEP8 warnings
-    "F",      # Pyflakes
-    "I",      # isort (import ordering)
-    "N",      # PEP8 naming
-    "UP",     # pyupgrade (modern syntax)
-    "B",      # Bugbear (common pitfalls)
-    "SIM",    # Simplification
-    "C4",     # Comprehension style
-    "RUF",    # Ruff-specific rules
+    "E",   # PEP8 errors
+    "W",   # PEP8 warnings
+    "F",   # Pyflakes
+    "I",   # isort (import ordering)
+    "N",   # PEP8 naming
+    "UP",  # pyupgrade (modern syntax)
+    "B",   # Bugbear (common pitfalls)
+    "SIM", # Simplification
+    "C4",  # Comprehension style
+    "RUF", # Ruff-specific rules
 ]
 ignore = [
-    "E501",   # Line too long — handled by formatter
+    "E501", # Line too long — handled by formatter
 ]
 
 [tool.ruff.lint.isort]
