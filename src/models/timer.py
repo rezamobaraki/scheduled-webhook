@@ -24,6 +24,20 @@ class Timer(StateMixin, BaseModel):
     __tablename__ = "timers"
     __table_args__ = (
         Index("ix_timers_status_scheduled_at", "status", "scheduled_at"),
+        Index(
+            "ix_timers_pending_undispatched",
+            "scheduled_at",
+            postgresql_where=text(
+                "status = 'pending' AND dispatched_at IS NULL",
+            ),
+        ),
+        Index(
+            "ix_timers_overdue_candidates",
+            "scheduled_at",
+            postgresql_where=text(
+                "status IN ('pending', 'processing')",
+            ),
+        ),
         CheckConstraint(
             """
             (status = 'pending'    AND executed_at IS NULL AND failed_at IS NULL)

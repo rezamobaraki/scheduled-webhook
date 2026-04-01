@@ -1,91 +1,72 @@
-# Known Issues & Resolution Plan
+# Known Issues
 
-## Problems
+Two dispatch-related bugs that cause duplicate Celery messages.
 
-### 1. Dispatcher sends duplicates every 5 minutes
+## 1. Dispatcher re-sends the same timer every 5 minutes
 
-`dispatch_upcoming_timers` runs on Beat every ~5 min and selects all `PENDING` timers
-in the window. Because there is no record of "already sent to broker," timers that were
-dispatched on the previous Beat cycle (or by the API at creation time) get re-published
-to Celery on every pass.
+The Beat task `dispatch_upcoming_timers` picks up every `PENDING` timer in the window
+— including ones it already sent last cycle. There's nothing in the DB to say
+"this timer was already handed to the broker."
 
-**Root cause:** No `dispatched_at` guard — the query has no way to distinguish
-"not yet dispatched" from "dispatched but still pending."
+## 2. Sweep re-dispatches timers that are still being processed
 
-### 2. Sweep re-dispatches PROCESSING timers
-
-`sweep_overdue_timers` selects all `PENDING | PROCESSING` timers whose `scheduled_at`
-has passed. A timer that is actively being delivered by a worker (status = `PROCESSING`)
-gets re-dispatched immediately, creating unnecessary broker traffic and contention.
-
-**Root cause:** The sweep does not distinguish "active right now" from "stuck after a
-worker crash." Any `PROCESSING` timer is treated as overdue.
+`sweep_overdue_timers` treats all `PROCESSING` timers as stuck. If a worker is
+actively delivering a webhook, the sweep fires a second copy 60 s later anyway.
 
 ---
 
-## Chosen Fix — `dispatched_at` + stale threshold
+# Fix
 
-The simplest fix that solves both problems with minimal schema change.
+One new column and one config value. No new tables, models, or processes.
 
-| Problem | Fix |
-|---------|-----|
-| Duplicate dispatch | Add `dispatched_at` column; filter `WHERE dispatched_at IS NULL` |
-| Premature re-dispatch | Only sweep `PROCESSING` timers older than a stale threshold (e.g. 120 s) |
+### What changed
 
-### How it works
+- **`dispatched_at`** (`TIMESTAMP`, nullable) on the `timers` table.  
+  Set when a timer is sent to the broker. The dispatcher query now filters
+  `WHERE dispatched_at IS NULL`, so it only picks up timers that haven't been sent yet.
+
+- **`processing_stale_threshold`** (default 120 s) in app config.  
+  The sweep only re-dispatches a `PROCESSING` timer when its `dispatched_at` is older
+  than this threshold — meaning the worker likely crashed. Fresh processing timers
+  are left alone.
+
+### Before / after
 
 ```
-                    Current behaviour                   With the fix
-                    ─────────────────                   ─────────────
+Dispatcher (issue #1)
 
-Dispatcher:         Timer due at T+3 min                Timer due at T+3 min
-                    API dispatches at T=0               API dispatches at T=0, stamps dispatched_at
-                    Beat runs at T+1, sees PENDING      Beat runs at T+1, sees dispatched_at IS NOT NULL
-                    → sends DUPLICATE message           → SKIPS it ✅
+  Before:  Beat runs → sees PENDING timer → sends to broker (again)
+  After:   Beat runs → sees dispatched_at is set → skips ✅
 
-Sweep:              Worker claims timer → PROCESSING    Worker claims timer → PROCESSING
-                    Sweep runs 60 s later               Sweep runs 60 s later, checks stale threshold
-                    → sends DUPLICATE message           → timer is only 60 s old, threshold is 120 s
-                                                        → SKIPS it ✅
+Sweep (issue #2)
 
-                                                        Worker crashes, timer stuck at PROCESSING
-                                                        Sweep runs 3 min later, timer is 180 s > 120 s
-                                                        → re-dispatches it ✅ (recovery still works)
+  Before:  Sweep runs 60s after dispatch → sees PROCESSING → re-sends
+  After:   Sweep runs 60s after dispatch → timer is 60s old, threshold is 120s → skips ✅
+
+  Worker crashes → timer stuck at PROCESSING for 3 min → 180s > 120s → re-dispatches ✅
 ```
 
-### Change map
+### Files touched
 
-| Layer | Change |
-|-------|--------|
-| **Model** `src/models/timer.py` | Add `dispatched_at: TIMESTAMP(timezone=True), nullable=True` |
-| **Config** `src/core/configs/app.py` | Add `processing_stale_threshold: int = 120` |
-| **Migration** | One `ADD COLUMN dispatched_at` |
-| **Repository** `get_upcoming_pending()` | Add `.where(Timer.dispatched_at.is_(None))` |
-| **Repository** `get_overdue_for_update()` | Split `PROCESSING` branch: include only rows where `now - dispatched_at > stale_threshold` |
-| **Tasks** `dispatch_upcoming_timers` | Stamp `timer.dispatched_at = now; session.commit()` after `apply_async` |
-| **Service** `create_timer` | Stamp `dispatched_at` when dispatching within the window |
-
-~20 lines of logic across 4 files. No new tables, models, or processes.
+| File | What |
+|------|------|
+| `src/models/timer.py` | Added `dispatched_at` column |
+| `src/core/configs/app.py` | Added `processing_stale_threshold` setting |
+| `src/repository/timer.py` | Dispatcher filters on `dispatched_at IS NULL`; sweep splits `PROCESSING` with stale cutoff |
+| `src/worker/tasks.py` | Both tasks stamp `dispatched_at` after publishing |
+| `src/services/timer.py` | `create_timer` stamps `dispatched_at` on immediate dispatch |
+| `migrations/` | One `ADD COLUMN` migration |
 
 ---
 
-## Alternative Considered — Transactional Outbox
+# Alternative: Transactional Outbox
 
-For a production system at high traffic (100+ creations/sec), the stronger approach
-would decouple "decide to dispatch" from "publish to Celery" via a transactional outbox:
+For a high-traffic production system (100+ creations/sec), the better approach is an
+outbox table written in the same DB transaction as the timer. A separate relay process
+polls the outbox and publishes to Celery, eliminating the dual-write between Postgres
+and Redis.
 
-- An `timer_outbox` table is written in the **same DB transaction** as the timer state
-  change, eliminating the DB/broker dual-write.
-- A separate **relay process** polls unpublished outbox rows and publishes to Celery.
-- A `dispatch_version` column makes duplicate relay publishes idempotent.
-
-### Why it was not chosen
-
-- Introduces a new table, a new model, and a standalone relay process.
-- `dispatch_version` concurrency control is harder to test correctly.
-- The existing architecture (two-layer scheduler + `SELECT … FOR UPDATE` + `acks_late`)
-  is already sound — the bugs are missing guards, not an architectural gap.
-- Disproportionate to the scope of the assignment.
-
-The outbox pattern becomes the right call when broker reliability is a hard requirement
-or traffic volumes make the dual-write a latency concern.
+This wasn't chosen here because the bugs are missing guards, not an architectural
+problem. The current two-layer scheduler with `SELECT … FOR UPDATE` and `acks_late`
+is sound — adding an outbox, a relay process, and version-based idempotency would be
+over-engineering for the scope of this project.

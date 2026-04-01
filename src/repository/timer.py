@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,10 +90,7 @@ class SyncTimerRepository(TimerSyncInterface):
         ``skip_locked=True`` lets concurrent sweep tasks partition work
         without blocking each other.
         """
-        stale_cutoff = datetime.fromtimestamp(
-            now.timestamp() - stale_threshold,
-            tz=now.tzinfo,
-        )
+        stale_cutoff = now - timedelta(seconds=stale_threshold)
         return list(
             self._session.execute(
                 select(Timer)
