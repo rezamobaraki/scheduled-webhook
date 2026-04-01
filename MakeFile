@@ -2,13 +2,13 @@
 
 # ── Development ──────────────────────────────────────────────────────────────
 
-run:  ## Start the FastAPI dev server
+run: migrate ## Start the FastAPI dev server
 	uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 
-worker:  ## Start Celery worker
+worker: migrate ## Start Celery worker
 	uv run celery -A src.worker.celery_app:celery_app worker --loglevel=info
 
-beat:  ## Start Celery Beat scheduler
+beat: migrate ## Start Celery Beat scheduler
 	uv run celery -A src.worker.celery_app:celery_app beat --loglevel=info
 
 # ── Testing & Quality ────────────────────────────────────────────────────────
