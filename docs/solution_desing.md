@@ -385,7 +385,7 @@ If this service had to evolve beyond the assignment, these would be the next imp
 
 - Add a transactional outbox so broker publishing is coupled more safely to the database commit.
 - Add dead-letter handling for permanently failing webhook targets.
-- Consider Redis Sentinel, RabbitMQ, or SQS for stronger broker availability guarantees.
+- Consider Redis Sentinel, Kafka, RabbitMQ, or SQS for stronger broker availability guarantees.
 
 ### Scale
 

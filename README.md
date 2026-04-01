@@ -246,13 +246,13 @@ That gives effective exactly-once behavior at the business level even if the web
 
 For **100+ timer creations per second**:
 
-| Area | Change |
-|---|---|
-| **DB writes** | PgBouncer connection pool in front of Postgresql |
-| **DB reads** | Read replicas for `GET /timer/{id}` |
+| Area | Change                                                                            |
+|---|-----------------------------------------------------------------------------------|
+| **DB writes** | PgBouncer connection pool in front of Postgresql                                  |
+| **DB reads** | Read replicas for `GET /timer/{id}`                                               |
 | **Sweep efficiency** | Range-partition `timers` by `scheduled_at`; sweep hits only the current partition |
-| **Broker HA** | Redis Sentinel / Cluster, or switch to RabbitMQ / SQS |
-| **Workers** | Auto-scale Celery workers by queue depth (KEDA / custom) |
-| **Old data** | Archive `executed` / `failed` timers older than N days to cold storage |
-| **Observability** | Prometheus metrics: creation rate, webhook latency, sweep lag, retry rate |
-| **Rate limiting** | Protect `POST /timer` with token-bucket rate limiter |
+| **Broker HA** | Redis Sentinel / Cluster, or switch to Kafka / SQS / RabbitMQ                     |
+| **Workers** | Auto-scale Celery workers by queue depth (KEDA / custom)                          |
+| **Old data** | Archive `executed` / `failed` timers older than N days to cold storage            |
+| **Observability** | Prometheus metrics: creation rate, webhook latency, sweep lag, retry rate         |
+| **Rate limiting** | Protect `POST /timer` with token-bucket rate limiter                              |
