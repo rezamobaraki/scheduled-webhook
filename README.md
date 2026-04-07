@@ -5,7 +5,7 @@ Welcome to my In-Hurry Implementation of the Timer Service ;)
 A scalable webhook scheduling service built with
 **FastAPI · Celery · Postgresql · Redis**.
 
-See [docs/solution_desing.md](docs/solution_desing.md) for the full design write-up.
+See [docs/solution_desing.md](docs/solution_design.md) for the full design write-up.
 
 
 There are a few additional improvements I would consider in a next iteration, but based on my own time estimate for the assignment, I chose to prioritize delivering a solid and complete core solution.
