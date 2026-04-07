@@ -1,6 +1,6 @@
 # Timer Service
 
-Wellcome to my In-Hurry Implementation of the Timer Service ;)
+Welcome to my In-Hurry Implementation of the Timer Service ;)
 
 A scalable webhook scheduling service built with
 **FastAPI · Celery · Postgresql · Redis**.
