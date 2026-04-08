@@ -469,6 +469,9 @@ Comparison with the current `FOR UPDATE` approach:
 For the current assignment scale the `flush()`-based row lock is simpler and sufficient.
 Advisory locks are the natural upgrade path if webhook timeout or worker concurrency grows.
 
+For a practical discussion of PostgreSQL advisory locks for balancing database load, see
+[Channable – Using PostgreSQL Locks to Balance Database Load](https://www.channable.com/tech/using-postgresql-locks-to-balance-database-load).
+
 ### Data Model Evolution
 
 - Keep the current single `timers` table for the assignment because it is simpler and easier to reason about.
