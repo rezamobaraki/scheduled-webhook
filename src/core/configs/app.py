@@ -8,9 +8,13 @@ class AppSettings(BaseConfig):
 
     # ── Two-layered scheduler ─────────────────────────────────────────
     dispatch_window: int = 60 * 5  # seconds — timers due within this window are sent to Redis
-    dispatch_interval: float = 60 * 5  # seconds — how often the dispatcher Beat task runs
+    dispatch_interval: float = (
+        dispatch_window * 1.1
+    )  # seconds — how often the dispatcher Beat task runs
     sweep_interval: float = 60  # seconds — how often the overdue recovery sweep runs
-    processing_stale_threshold: int = 120  # seconds — PROCESSING timers older than this are re-dispatched
+    processing_stale_threshold: int = (
+        120  # seconds — PROCESSING timers older than this are re-dispatched
+    )
 
     max_timer_seconds: int = 30 * 24 * 3600  # 30 days
     max_url_length: int = 2048  # must match DB column: String(2048)
