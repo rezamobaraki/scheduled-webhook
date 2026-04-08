@@ -306,6 +306,15 @@ Primary goal in this section: satisfy the non-functional requirements.
 - `fire_webhook` loads the timer with `SELECT ... FOR UPDATE`.
 - This is the core exactly-once mechanism.
 - Only one worker can actively hold the row at a time.
+- After claiming (transitioning to `PROCESSING`), the worker uses `flush()` instead of `commit()`.
+  This writes the status change to the database but keeps the transaction — and therefore the row lock —
+  open through the entire webhook delivery. A duplicate Celery task arriving during the HTTP call will
+  block on the lock and then see a finalised state, preventing double delivery.
+  The tradeoff is that each worker holds a database connection for the duration of the webhook call
+  (up to the configured timeout of 10 seconds). At moderate concurrency this is negligible.
+  If the webhook timeout or worker count grows significantly, advisory locks (`pg_try_advisory_lock`)
+  would decouple the lock lifetime from the transaction, allowing the status commit and the delivery
+  lock to be managed independently.
 - The overdue sweep uses `skip_locked=True` so concurrent sweep executions do not block each other.
 - `dispatched_at` prevents the dispatcher from re-publishing timers that are already in the broker queue.
   The query filters `WHERE dispatched_at IS NULL`, so only genuinely un-dispatched timers are picked up.
@@ -402,6 +411,63 @@ If this service had to evolve beyond the assignment, these would be the next imp
 - Partition the `timers` table by `scheduled_at` for very large datasets.
 - Add archival/cleanup for old `executed` and `failed` timers.
 - Auto-scale workers based on queue depth.
+
+### Concurrency — Advisory Locks
+
+The current design holds a `SELECT ... FOR UPDATE` row lock through the entire webhook delivery.
+This is correct and simple, but it keeps a database transaction open for up to 10 seconds (the webhook timeout).
+If webhook timeouts grow or worker counts increase significantly, long-held transactions can exhaust the
+connection pool or interfere with autovacuum.
+
+PostgreSQL advisory locks decouple the application-level mutex from the transaction lifetime:
+
+```python
+# 1. Acquire an advisory lock keyed on the timer id (non-blocking).
+lock_key = timer_id.int & 0x7FFFFFFF          # positive int32
+acquired = session.execute(
+    text("SELECT pg_try_advisory_lock(:key)"),
+    {"key": lock_key},
+).scalar()
+
+if not acquired:
+    return  # another worker owns this timer — skip
+
+try:
+    # 2. Short transaction: read state, set PROCESSING, commit.
+    #    Row lock is released on commit, advisory lock still held.
+    timer = session.get(Timer, timer_id)
+    if timer.status in (TimerStatus.EXECUTED, TimerStatus.FAILED):
+        return
+    timer.transition_to(TimerStatus.PROCESSING)
+    session.commit()                            # row lock released here
+
+    # 3. Deliver webhook — no open transaction, no held row lock.
+    webhook_service.deliver(timer.id, timer.url)
+
+    # 4. Finalise in a new short transaction.
+    timer.transition_to(TimerStatus.EXECUTED)
+    timer.executed_at = datetime.now(UTC)
+    session.commit()
+finally:
+    # 5. Release the advisory lock (also auto-released on disconnect).
+    session.execute(
+        text("SELECT pg_advisory_unlock(:key)"),
+        {"key": lock_key},
+    )
+```
+
+Comparison with the current `FOR UPDATE` approach:
+
+| | `FOR UPDATE` + `flush()` (current) | Advisory lock |
+|---|---|---|
+| Transaction held during HTTP call | Yes — up to webhook timeout | No — commits are short |
+| Connection held during delivery | Yes | No |
+| Auto-released on worker crash | Yes (transaction rollback) | Yes (session disconnect) |
+| Hash collision risk | N/A | Two UUIDs may map to same int32 — use 64-bit `pg_try_advisory_lock(hi, lo)` to eliminate |
+| Code complexity | Low | Medium — explicit acquire/release required |
+
+For the current assignment scale the `flush()`-based row lock is simpler and sufficient.
+Advisory locks are the natural upgrade path if webhook timeout or worker concurrency grows.
 
 ### Data Model Evolution
 

@@ -51,7 +51,7 @@ Editable and shareable versions:
 | **Future scheduling** | Beat dispatches `pending` timers due in the next 5 minutes |
 | **Duplicate dispatch** | `dispatched_at` column — Beat and API stamp it on first dispatch; query filters `WHERE dispatched_at IS NULL` |
 | **Restart recovery** | Beat sweeps every 60 s for overdue `pending` timers and `processing` timers older than the stale threshold |
-| **Exactly-once** | `SELECT … FOR UPDATE` + state check inside `fire_webhook` |
+| **Exactly-once** | `SELECT … FOR UPDATE` + `flush()` keeps the row lock open through webhook delivery; a duplicate task blocks and then sees the finalised state. Tradeoff: DB connection held for up to 10 s. Upgrade path: `pg_try_advisory_lock` decouples the mutex from the transaction so connections are freed immediately after the status commit — at the cost of explicit lock management and int32 hash-collision risk (use 64-bit variant to eliminate). |
 | **Horizontal scale** | Stateless API replicas · competing Celery workers |
 | **Retry** | Exponential back-off (5 s → 10 s → 20 s), then `FAILED` |
 
