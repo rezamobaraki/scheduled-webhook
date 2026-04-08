@@ -71,9 +71,19 @@ def fire_webhook(self, timer_id: str) -> None:
             return
 
         # ── Claim ────────────────────────────────────────────────────
-        timer.transition_to(TimerStatus.PROCESSING)
+        if timer.status == TimerStatus.PROCESSING and self.request.retries == 0:
+            # Not a retry, but already claimed by another worker — skip
+            return
+
+        if timer.status == TimerStatus.PENDING:
+            timer.transition_to(TimerStatus.PROCESSING)
+
         timer.attempt_count = self.request.retries + 1
-        session.commit()
+        # flush() not commit() — keeps the FOR UPDATE lock held through delivery.
+        # - prevents a duplicate task claiming the row while HTTP call is in flight
+        # - tradeoff: DB connection held for up to webhook timeout (10 s)
+        # - upgrade path: advisory locks if timeout/concurrency grows significantly
+        session.flush()
 
         # ── Deliver ──────────────────────────────────────────────────
         try:
@@ -116,18 +126,20 @@ def dispatch_upcoming_timers() -> None:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
         now = datetime.now(UTC)
         window_end = now + timedelta(seconds=settings.app.dispatch_window)
-        upcoming = timer_repository.get_upcoming_pending(now, window_end)
+        total = 0
 
-        for timer in upcoming:
-            fire_webhook.apply_async(
-                args=[str(timer.id)],
-                eta=timer.scheduled_at,
-            )
-            timer.dispatched_at = datetime.now(UTC)
-
-        if upcoming:
+        while batch := timer_repository.get_upcoming_pending(now, window_end):
+            for timer in batch:
+                fire_webhook.apply_async(
+                    args=[str(timer.id)],
+                    eta=timer.scheduled_at,
+                )
+                timer.dispatched_at = datetime.now(UTC)
             session.commit()
-            logger.info(f"Dispatcher sent {len(upcoming)} upcoming timer(s) to broker.")
+            total += len(batch)
+
+        if total:
+            logger.info(f"Dispatcher sent {total} upcoming timer(s) to broker.")
 
 
 @celery_app.task
@@ -141,15 +153,17 @@ def sweep_overdue_timers() -> None:
     with SyncSessionLocal() as session:
         timer_repository: TimerSyncInterface = SyncTimerRepository(session)
         now = datetime.now(UTC)
-        overdue = timer_repository.get_overdue_for_update(
+        total = 0
+
+        while batch := timer_repository.get_overdue_for_update(
             now,
             stale_threshold=settings.app.processing_stale_threshold,
-        )
-
-        for timer in overdue:
-            fire_webhook.delay(str(timer.id))
-            timer.dispatched_at = datetime.now(UTC)
-
-        if overdue:
+        ):
+            for timer in batch:
+                fire_webhook.delay(str(timer.id))
+                timer.dispatched_at = datetime.now(UTC)
             session.commit()
-            logger.info(f"Sweep dispatched {len(overdue)} overdue timer(s).")
+            total += len(batch)
+
+        if total:
+            logger.info(f"Sweep dispatched {total} overdue timer(s).")
