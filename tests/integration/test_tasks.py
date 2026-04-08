@@ -5,6 +5,7 @@ task → repository → DB round-trip plus retry and sweep logic.
 """
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.core.configs import settings
+from src.core.database import SyncSessionLocal
 from src.core.errors import WebhookDeliveryError
 from src.enums import TimerStatus
 from src.models import Timer
@@ -92,7 +94,8 @@ class TestFireWebhook:
 
         timer = _insert_timer(sync_session)
         mock_service.deliver.side_effect = WebhookDeliveryError(
-            timer.id, cause=Exception("connection refused"),
+            timer.id,
+            cause=Exception("connection refused"),
         )
 
         fire_webhook.apply(args=[str(timer.id)])
@@ -115,7 +118,8 @@ class TestFireWebhook:
 
         timer = _insert_timer(sync_session)
         mock_service.deliver.side_effect = WebhookDeliveryError(
-            timer.id, cause=Exception("Internal Server Error"),
+            timer.id,
+            cause=Exception("Internal Server Error"),
         )
 
         fire_webhook.apply(args=[str(timer.id)])
@@ -420,3 +424,47 @@ class TestDispatcher:
 
         sync_session.refresh(timer)
         assert timer.dispatched_at is not None
+
+
+# ── Concurrency ──────────────────────────────────────────────────────────────
+
+
+class TestConcurrency:
+    """Verify that ``SELECT … FOR UPDATE`` prevents double delivery
+    when multiple workers race on the same timer.
+    """
+
+    @patch("src.worker.tasks.webhook_service")
+    def test_concurrent_fire_webhook_delivers_once(self, mock_service):
+        """Launch N threads calling ``fire_webhook`` for the same timer.
+
+        Only one should deliver; the rest must skip or block-then-skip.
+        Each thread uses its own DB session (as real workers would).
+        """
+        from src.worker.tasks import fire_webhook
+
+        with SyncSessionLocal() as session:
+            timer = Timer(
+                id=uuid.uuid4(),
+                url=_WEBHOOK_URL,
+                scheduled_at=datetime.now(UTC) - timedelta(seconds=60),
+                status=TimerStatus.PENDING,
+            )
+            session.add(timer)
+            session.commit()
+            timer_id = str(timer.id)
+
+        workers = 5
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(fire_webhook.apply, args=[timer_id]) for _ in range(workers)]
+            for f in as_completed(futures):
+                f.result()  # propagate exceptions
+
+        assert mock_service.deliver.call_count == 1
+
+        with SyncSessionLocal() as session:
+            timer = session.get(Timer, uuid.UUID(timer_id))
+            assert timer.status == TimerStatus.EXECUTED
+            assert timer.executed_at is not None
+            assert timer.attempt_count == 1
